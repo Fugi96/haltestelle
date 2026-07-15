@@ -1,0 +1,15 @@
+# VS Code
+.vscode
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Local data (station cache DB, etc.)
+data/
+*.sqlite
+
+# Env / secrets
+.env

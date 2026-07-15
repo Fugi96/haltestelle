@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Haltestelle</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 32rem; margin: 3rem auto; padding: 0 1rem; }
+    h1 { font-size: 1.4rem; }
+    .row { display: flex; gap: 0.5rem; }
+    input { flex: 1; padding: 0.55rem; font-size: 1rem; }
+    button { padding: 0.55rem 0.9rem; font-size: 1rem; cursor: pointer; }
+    ul { list-style: none; padding: 0; margin: 0.5rem 0; border: 1px solid #ddd; border-radius: 4px; }
+    ul:empty { display: none; }
+    li { padding: 0.5rem 0.7rem; cursor: pointer; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; gap: 1rem; }
+    li:last-child { border-bottom: none; }
+    li:hover { background: #f2f6ff; }
+    li small { color: #999; white-space: nowrap; }
+    #current { margin-top: 1rem; font-weight: 600; }
+    #status { color: #666; min-height: 1.2em; }
+    .hint { color: #999; font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <h1>Haltestelle</h1>
+
+  <div class="row">
+    <input id="q" placeholder="Station name" autocomplete="off" />
+    <button id="search-btn" type="button">Search online</button>
+  </div>
+
+  <ul id="results"></ul>
+
+  <p id="status"></p>
+  <p id="current"></p>
+
+  <script>
+    const q = document.getElementById("q");
+    const results = document.getElementById("results");
+    const status = document.getElementById("status");
+    const current = document.getElementById("current");
+    const searchBtn = document.getElementById("search-btn");
+
+    function showCurrent(st) {
+      current.textContent = st && st.name ? "Selected: " + st.name : "No station selected.";
+    }
+
+    function render(list, source) {
+      results.innerHTML = "";
+      list.forEach((s) => {
+        const li = document.createElement("li");
+        const label = document.createElement("span");
+        label.textContent = s.name;
+        const tag = document.createElement("small");
+        tag.textContent = source;
+        li.append(label, tag);
+        li.addEventListener("click", () => select(s));
+        results.appendChild(li);
+      });
+    }
+
+    async function select(s) {
+      status.textContent = "Saving…";
+      results.innerHTML = "";
+      try {
+        const res = await fetch("/api/station", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: s.id, name: s.name, short_name: s.short_name }),
+        });
+        if (!res.ok) throw new Error(res.statusText);
+        showCurrent(await res.json());
+        status.textContent = "";
+        q.value = "";
+      } catch (e) {
+        status.textContent = "Error: " + e.message;
+      }
+    }
+
+    // Live typeahead over locally-known stations (cheap, offline).
+    let debounce;
+    q.addEventListener("input", () => {
+      clearTimeout(debounce);
+      const term = q.value.trim();
+      if (!term) { results.innerHTML = ""; return; }
+      debounce = setTimeout(async () => {
+        try {
+          const res = await fetch("/api/stations?q=" + encodeURIComponent(term));
+          render(await res.json(), "known");
+        } catch { /* ignore typeahead errors */ }
+      }, 200);
+    });
+
+    // Explicit online lookup via the EFA stopfinder.
+    searchBtn.addEventListener("click", async () => {
+      const term = q.value.trim();
+      if (!term) return;
+      status.textContent = "Searching…";
+      try {
+        const res = await fetch("/api/stations/lookup?q=" + encodeURIComponent(term));
+        if (!res.ok) throw new Error("lookup failed");
+        const list = await res.json();
+        status.textContent = list.length ? "" : "No stations found.";
+        render(list, "online");
+      } catch (e) {
+        status.textContent = "Error: " + e.message;
+      }
+    });
+
+    // Show the currently selected station on load.
+    fetch("/api/station").then((r) => r.json()).then(showCurrent).catch(() => {});
+  </script>
+</body>
+</html>
