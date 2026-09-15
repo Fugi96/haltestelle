@@ -13,3 +13,6 @@ data/
 
 # Env / secrets
 .env
+
+# Local notes
+efa_api_documentation.txt

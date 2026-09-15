@@ -48,6 +48,20 @@ def init_db() -> None:
             """
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_stations_name ON stations(name)")
+        conn.execute("""
+                     CREATE TABLE IF NOT EXISTS settings(
+                        setting TEXT PRIMARY KEY, -- name of the setting
+                        value   TEXT              -- value of the setting
+                     )
+                     """)
+        conn.execute("""
+                     INSERT OR IGNORE INTO settings (setting, value)
+                     VALUES (:setting, :value)
+                     """,
+                     {
+                         "setting": "selected",
+                         "value": None
+                     })
 
 
 def upsert_station(station: dict) -> None:

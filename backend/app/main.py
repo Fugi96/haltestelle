@@ -12,6 +12,7 @@ Endpoints:
     GET  /api/stations/lookup  -> online lookup via EFA (adds nothing itself)
     POST /api/station          -> select a station (sets current + caches it)
     GET  /api/station          -> the currently selected station
+    GET  /api/departures       -> departures for the selected station
 
 Run (from the `backend/` directory):
 
@@ -27,7 +28,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, HTMLResponse
 
 from . import db, efa, state
-from .models import StationCandidate, StationSelection, StationState
+from .models import DepartureBoard, StationCandidate, StationSelection, StationState
 
 # Where the frontend files live. Defaults to the sibling `frontend/` folder in
 # the repo, but is overridable via env var so the path can differ in Docker.
@@ -100,3 +101,18 @@ def read_station():
     """Return the station currently selected for polling."""
     current = state.get_station()
     return StationState(**current) if current else StationState()
+
+
+@app.get("/api/departures", response_model=DepartureBoard)
+def read_departures(limit: int = Query(8, ge=1, le=30)):
+    """Departures for the currently selected station.
+
+    Same payload the poller will publish, so it can be inspected directly.
+    """
+    current = state.get_station()
+    if not current:
+        raise HTTPException(status_code=409, detail="No station selected.")
+    try:
+        return efa.fetch_departures(current["id"], limit=limit)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Departure lookup failed: {exc}")
