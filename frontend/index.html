@@ -5,26 +5,110 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Haltestelle</title>
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 32rem; margin: 3rem auto; padding: 0 1rem; }
-    h1 { font-size: 1.4rem; }
-    .row { display: flex; gap: 0.5rem; }
-    input { flex: 1; padding: 0.55rem; font-size: 1rem; }
-    button { padding: 0.55rem 0.9rem; font-size: 1rem; cursor: pointer; }
-    ul { list-style: none; padding: 0; margin: 0.5rem 0; border: 1px solid #ddd; border-radius: 4px; }
-    ul:empty { display: none; }
-    li { padding: 0.5rem 0.7rem; cursor: pointer; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; gap: 1rem; }
-    li:last-child { border-bottom: none; }
-    li:hover { background: #f2f6ff; }
-    li small { color: #999; white-space: nowrap; }
-    #current { margin-top: 1rem; font-weight: 600; }
-    #status { color: #666; min-height: 1.2em; }
-    .hint { color: #999; font-size: 0.85rem; }
-
-    #filters {
-      display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center;
-      gap: 0.4rem; margin: 1.6rem 0; padding: 0.7rem 0.9rem;
-      border: 1px solid #ddd; border-radius: 14px;
+    /* Exactly one viewport tall; only #lines scrolls. dvh tracks mobile browser bars. */
+    :root { --sign: #0b2a5b; --stop-yellow: #f5c400; --stop-green: #0a7a3e; }
+    body {
+      font-family: system-ui, sans-serif; max-width: 34rem; margin: 0 auto; padding: 1.1rem 1rem 0;
+      box-sizing: border-box; height: 100vh; height: 100dvh;
+      display: flex; flex-direction: column;
     }
+    body > * { flex-shrink: 0; }
+    [hidden] { display: none !important; }
+    button { cursor: pointer; }
+    .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+
+    /* Brand row: stop sign mark, name, brightness and power. */
+    .brand { display: flex; align-items: center; gap: 0.55rem; }
+    .brand-mark { width: 1.9rem; height: 1.9rem; }
+    .brand h1 { margin: 0; font-size: 0.9rem; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: #333; }
+    .controls { position: relative; z-index: 3; margin-left: auto; display: flex; gap: 0.45rem; }
+    /* Bare icons; the button keeps its size as the tap target. */
+    .ctl {
+      width: 2.75rem; height: 2.75rem; padding: 0.3rem; border: none; background: none; color: #111;
+      touch-action: manipulation; -webkit-tap-highlight-color: transparent; transition: transform 0.08s;
+    }
+    .ctl svg { display: block; width: 100%; height: 100%; }
+    .ctl:active { transform: scale(0.88); }
+    /* Red icon when on. When off, a white icon on a solid red disc: the one colored element left. */
+    #power-btn { position: relative; color: #e2231a; transition: color 1.5s, transform 0.08s; }
+    #power-btn::before {
+      content: ""; position: absolute; inset: 0; border-radius: 50%; background: #e2231a;
+      opacity: 0; transform: scale(0.6); transition: opacity 1.5s, transform 1.5s;
+    }
+    #power-btn svg { position: relative; }
+    #power-btn[aria-pressed="false"] { color: #fff; }
+    #power-btn[aria-pressed="false"]::before { opacity: 1; transform: scale(1); }
+    #brightness-panel {
+      position: absolute; top: 100%; right: 0; width: 15rem; max-width: calc(100vw - 2rem); margin-top: 0.4rem;
+      padding: 0.8rem 1rem 0.9rem; box-sizing: border-box;
+      background: #fff; border: 1px solid #ddd; border-radius: 14px; box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
+    }
+    .brightness-head { display: flex; justify-content: space-between; font-size: 0.9rem; color: #333; margin-bottom: 0.5rem; }
+    #brightness-value { font-weight: 600; font-variant-numeric: tabular-nums; }
+    #brightness { width: 100%; margin: 0; accent-color: var(--sign); }
+
+    /* Station name plate, with the white pinstripe of a platform sign. */
+    .sign {
+      /* minmax(0, 1fr): otherwise the search field's intrinsic width widens the column on narrow screens. */
+      display: grid; grid-template-columns: minmax(0, 1fr);
+      margin-top: 0.8rem; border-radius: 14px; background: var(--sign); color: #fff;
+      box-shadow: inset 0 0 0 4px var(--sign), inset 0 0 0 5.5px rgba(255, 255, 255, 0.8);
+    }
+    /* Sign and search share one cell, so the plate keeps its height when switching. */
+    .sign > * { grid-area: 1 / 1; }
+    .sign:not(.searching) .sign-search, .sign.searching .sign-show { visibility: hidden; }
+    .sign-show, .sign-search { display: flex; align-items: center; gap: 0.7rem; padding: 0.8rem 1.15rem; }
+    .sign-show {
+      width: 100%; border: none; background: none; color: inherit; font: inherit; text-align: left;
+      touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+    }
+    .sign-text { flex: 1; min-width: 0; }
+    #sign-place { display: block; font-size: 0.8rem; opacity: 0.75; }
+    #sign-name { display: block; font-size: 1.45rem; font-weight: 700; line-height: 1.2; overflow-wrap: anywhere; }
+    .sign-show.empty #sign-name { font-weight: 500; opacity: 0.8; }
+    .sign-icon { width: 1.3rem; height: 1.3rem; flex-shrink: 0; opacity: 0.7; }
+    #q {
+      flex: 1; min-width: 0; padding: 0.35rem 0; font: inherit; font-size: 1.2rem; color: #fff;
+      background: none; border: none; border-bottom: 2px solid rgba(255, 255, 255, 0.5); border-radius: 0; outline: none;
+    }
+    #q:focus { border-bottom-color: #fff; }
+    #q::placeholder { color: rgba(255, 255, 255, 0.6); }
+    #search-cancel {
+      width: 2rem; height: 2rem; flex-shrink: 0; padding: 0; border: none; border-radius: 50%;
+      background: rgba(255, 255, 255, 0.15); color: #fff; font-size: 1.2rem; line-height: 1;
+    }
+
+    /* Suggestions drop over the page instead of pushing it down. */
+    .station { position: relative; z-index: 2; }
+    #results {
+      position: absolute; top: 100%; left: 0; right: 0; margin: 0.4rem 0 0; padding: 0; list-style: none;
+      background: #fff; border: 1px solid #ddd; border-radius: 14px; box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
+      max-height: 60vh; max-height: 60dvh; overflow-y: auto; overscroll-behavior: contain;
+    }
+    #results:empty { display: none; }
+    #results li { padding: 0.6rem 0.9rem; cursor: pointer; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; gap: 1rem; }
+    #results li:last-child { border-bottom: none; }
+    #results li:hover { background: #f2f6ff; }
+    #results li small { color: #999; white-space: nowrap; }
+    #results li.online { color: var(--sign); font-weight: 600; justify-content: flex-start; }
+    #results li.note { color: #666; cursor: default; }
+    #status { margin: 0.5rem 0 0; color: #666; font-size: 0.9rem; }
+    #status:empty { display: none; }
+
+    .panel { margin: 1.1rem 0; padding: 0.7rem 0.9rem; border: 1px solid #ddd; border-radius: 14px; }
+    #filters { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0.4rem; }
+    /* Fills the space left, sized independently of its rows; min-height 0 lets it scroll instead of grow. */
+    #lines { flex: 1 1 0; margin-top: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+    .line-row {
+      display: flex; align-items: center; gap: 0.6rem; width: 100%; padding: 0.5rem 0;
+      border: none; background: none; font: inherit; color: inherit; text-align: left;
+      touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+    }
+    .line-row + .line-row { border-top: 1px solid #eee; }
+    .line-row > * { transition: filter 0.15s, opacity 0.15s; }
+    .line-icon { width: 2.4rem; height: 1.4rem; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+    .line-icon img { width: 100%; height: 100%; object-fit: contain; }
+    .line-row strong { min-width: 3.5rem; }
     .filter-btn {
       /* The logo is the button. Common height, natural width per logo. */
       height: 2.9rem;
@@ -34,52 +118,200 @@
       transition: filter 0.15s, opacity 0.15s, transform 0.08s;
     }
     .filter-btn img { height: 100%; width: auto; max-width: 5rem; display: block; }
-    .filter-btn[aria-pressed="false"] { filter: saturate(0.2); opacity: 0.45; }
+    /* Rows dim their children, not themselves, so the dividers stay visible. */
+    .filter-btn[aria-pressed="false"],
+    .line-row[aria-pressed="false"] > * { filter: saturate(0.2); opacity: 0.45; }
     .filter-btn:active { transform: scale(0.92); }
+
+    /* Off: everything but the power button in grayscale, slightly washed out.
+       Contrast rather than opacity, so the dropdowns stay opaque. */
+    body > *, .brand > *, .controls > * { transition: filter 1.5s; }
+    body.off > :not(.brand),
+    body.off .brand > :not(.controls),
+    body.off .controls > :not(#power-btn) { filter: grayscale(1) contrast(0.85); }
   </style>
 </head>
 <body>
-  <h1>Haltestelle</h1>
+  <header class="brand">
+    <!-- German stop sign: green H on a yellow disc. -->
+    <svg class="brand-mark" viewBox="0 0 40 40" aria-hidden="true">
+      <circle cx="20" cy="20" r="18" fill="var(--stop-yellow)" stroke="var(--stop-green)" stroke-width="3" />
+      <text x="20" y="21" text-anchor="middle" dominant-baseline="central" font-family="system-ui, sans-serif"
+            font-size="21" font-weight="800" fill="var(--stop-green)">H</text>
+    </svg>
+    <h1>Haltestelle</h1>
+    <div class="controls">
+      <button id="brightness-btn" class="ctl" type="button" aria-label="Brightness" aria-expanded="false" aria-controls="brightness-panel">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="4" />
+          <path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" />
+        </svg>
+      </button>
+      <button id="power-btn" class="ctl" type="button" aria-label="Power" aria-pressed="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true">
+          <path d="M12 3v8" /><path d="M6.6 6.4a8 8 0 1 0 10.8 0" />
+        </svg>
+      </button>
+      <div id="brightness-panel" hidden>
+        <div class="brightness-head"><label for="brightness">Brightness</label><output id="brightness-value" for="brightness"></output></div>
+        <input id="brightness" type="range" min="5" max="100" step="5" />
+      </div>
+    </div>
+  </header>
 
-  <div class="row">
-    <input id="q" placeholder="Station name" autocomplete="off" />
-    <button id="search-btn" type="button">Search online</button>
+  <div class="station">
+    <div class="sign">
+      <button id="sign-show" class="sign-show" type="button">
+        <span class="sr-only">Change station:</span>
+        <span class="sign-text"><small id="sign-place"></small><span id="sign-name">&nbsp;</span></span>
+        <svg class="sign-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true">
+          <circle cx="10.5" cy="10.5" r="6.5" /><path d="M15.5 15.5 21 21" />
+        </svg>
+      </button>
+      <form id="search" class="sign-search">
+        <input id="q" type="text" placeholder="Search station" autocomplete="off" enterkeyhint="search" aria-label="Station name" />
+        <button id="search-cancel" type="button" aria-label="Cancel">×</button>
+      </form>
+    </div>
+    <ul id="results"></ul>
   </div>
 
-  <ul id="results"></ul>
-
   <p id="status"></p>
-  <p id="current"></p>
 
-  <div id="filters"></div>
+  <div id="filters" class="panel"></div>
+
+  <div id="lines" class="panel"></div>
 
   <script>
     const q = document.getElementById("q");
     const results = document.getElementById("results");
     const status = document.getElementById("status");
-    const current = document.getElementById("current");
-    const searchBtn = document.getElementById("search-btn");
+    const signShow = document.getElementById("sign-show");
+    const signPlace = document.getElementById("sign-place");
+    const signName = document.getElementById("sign-name");
+    const searchForm = document.getElementById("search");
 
-    function showCurrent(st) {
-      current.textContent = st && st.name ? "Selected: " + st.name : "No station selected.";
+    // --- power and brightness ------------------------------------------------
+
+    const powerBtn = document.getElementById("power-btn");
+    const brightBtn = document.getElementById("brightness-btn");
+    const brightPanel = document.getElementById("brightness-panel");
+    const brightInput = document.getElementById("brightness");
+    const brightValue = document.getElementById("brightness-value");
+    // The backend holds these; this mirrors it.
+    const settings = { on: true, brightness: 100 };
+
+    function showSettings() {
+      document.body.classList.toggle("off", !settings.on);
+      powerBtn.setAttribute("aria-pressed", String(settings.on));
+      brightInput.value = settings.brightness;
+      brightValue.textContent = settings.brightness + "%";
     }
 
-    function render(list, source) {
-      results.innerHTML = "";
-      list.forEach((s) => {
-        const li = document.createElement("li");
-        const label = document.createElement("span");
-        label.textContent = s.name;
-        const tag = document.createElement("small");
-        tag.textContent = source;
-        li.append(label, tag);
-        li.addEventListener("click", () => select(s));
-        results.appendChild(li);
+    async function loadSettings() {
+      const res = await fetch("/api/settings");
+      if (!res.ok) throw new Error(res.statusText);
+      Object.assign(settings, await res.json());
+      showSettings();
+    }
+
+    // Chained so rapid changes reach the backend in order.
+    let settingsSync = Promise.resolve();
+    function saveSettings() {
+      const body = JSON.stringify(settings);
+      settingsSync = settingsSync.then(async () => {
+        try {
+          const res = await fetch("/api/settings", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body,
+          });
+          if (!res.ok) throw new Error(res.statusText);
+        } catch (e) {
+          status.textContent = "Error saving settings: " + e.message;
+          await loadSettings().catch(() => {});
+        }
       });
     }
 
+    function showBrightness(open) {
+      brightPanel.hidden = !open;
+      brightBtn.setAttribute("aria-expanded", String(open));
+    }
+
+    powerBtn.addEventListener("click", () => {
+      settings.on = !settings.on;
+      showSettings();
+      saveSettings();
+    });
+    brightBtn.addEventListener("click", () => showBrightness(brightPanel.hidden));
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") showBrightness(false); });
+    // Label follows the thumb; saving waits for release.
+    brightInput.addEventListener("input", () => { brightValue.textContent = brightInput.value + "%"; });
+    brightInput.addEventListener("change", () => {
+      settings.brightness = Number(brightInput.value);
+      saveSettings();
+    });
+
+    // --- station ---------------------------------------------------------------
+
+    /** EFA names read "Düsseldorf, Opladener Straße": town above, stop below. */
+    function showCurrent(st) {
+      const name = st && st.name;
+      const cut = name ? name.indexOf(", ") : -1;
+      // Kept as a blank line without a town, so the sign and the list below keep their size.
+      signPlace.textContent = cut > 0 ? name.slice(0, cut) : " ";
+      signName.textContent = name ? (cut > 0 ? name.slice(cut + 2) : name) : "Choose a station";
+      signShow.classList.toggle("empty", !name);
+    }
+
+    function openSearch() {
+      searchForm.parentElement.classList.add("searching");
+      q.focus();
+    }
+
+    function closeSearch() {
+      clearTimeout(debounce);
+      q.value = "";
+      results.innerHTML = "";
+      searchForm.parentElement.classList.remove("searching");
+      // A hidden field can keep focus, and with it the phone keyboard.
+      q.blur();
+    }
+
+    signShow.addEventListener("click", openSearch);
+    document.getElementById("search-cancel").addEventListener("click", () => { closeSearch(); status.textContent = ""; });
+    q.addEventListener("keydown", (e) => { if (e.key === "Escape") closeSearch(); });
+
+    function resultItem(text, onClick, className) {
+      const li = document.createElement("li");
+      if (className) li.className = className;
+      li.textContent = text;
+      if (onClick) li.addEventListener("click", onClick);
+      return li;
+    }
+
+    /** Stations as rows. Saved results end with a row that searches online instead. */
+    function render(list, source, term) {
+      results.innerHTML = "";
+      list.forEach((s) => {
+        const li = resultItem(s.name, () => select(s));
+        if (source === "known") {
+          const tag = document.createElement("small");
+          tag.textContent = "saved";
+          li.append(tag);
+        }
+        results.appendChild(li);
+      });
+      if (source === "known") {
+        results.appendChild(resultItem(`Search online for “${term}”`, () => lookupOnline(term), "online"));
+      } else if (!list.length) {
+        results.appendChild(resultItem(`No stations found for “${term}”`, null, "note"));
+      }
+    }
+
     async function select(s) {
-      status.textContent = "Saving…";
+      status.textContent = "Loading station…";
       results.innerHTML = "";
       try {
         const res = await fetch("/api/station", {
@@ -87,10 +319,13 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ id: s.id, name: s.name, short_name: s.short_name }),
         });
-        if (!res.ok) throw new Error(res.statusText);
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.statusText);
         showCurrent(await res.json());
         status.textContent = "";
-        q.value = "";
+        closeSearch();
+        // The backend clears chosen lines when the station changes.
+        await loadChosen().catch(() => {});
+        loadLines();
       } catch (e) {
         status.textContent = "Error: " + e.message;
       }
@@ -105,25 +340,29 @@
       debounce = setTimeout(async () => {
         try {
           const res = await fetch("/api/stations?q=" + encodeURIComponent(term));
-          render(await res.json(), "known");
+          render(await res.json(), "known", term);
         } catch { /* ignore typeahead errors */ }
       }, 200);
     });
 
     // Explicit online lookup via the EFA stopfinder.
-    searchBtn.addEventListener("click", async () => {
-      const term = q.value.trim();
+    async function lookupOnline(term) {
       if (!term) return;
+      clearTimeout(debounce);
       status.textContent = "Searching…";
       try {
         const res = await fetch("/api/stations/lookup?q=" + encodeURIComponent(term));
         if (!res.ok) throw new Error("lookup failed");
-        const list = await res.json();
-        status.textContent = list.length ? "" : "No stations found.";
-        render(list, "online");
+        status.textContent = "";
+        render(await res.json(), "online", term);
       } catch (e) {
         status.textContent = "Error: " + e.message;
       }
+    }
+
+    searchForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      lookupOnline(q.value.trim());
     });
 
     // --- vehicle class filters ---------------------------------------------
@@ -137,8 +376,8 @@
       train: '<img src="/assets/db.svg" alt="">',
     };
 
-    // `classes` are EFA product.class values. Excluding 13-16 also drops the
-    // class 0 Ersatzverkehr umbrella, so it needs no button of its own.
+    // `classes` are EFA product.class values. Including 13-16 also returns
+    // class 0 Ersatzverkehr, so it needs no button of its own.
     const FILTERS = [
       { key: "sbahn", label: "S-Bahn", classes: [1] },
       { key: "ubahn", label: "U-Bahn", classes: [2] },
@@ -147,24 +386,10 @@
       { key: "train", label: "Zug", classes: [13, 14, 15, 16] },
     ];
 
-    const FILTER_STORE = "haltestelle.filters";
     const filtersEl = document.getElementById("filters");
-
-    function loadEnabled() {
-      try {
-        const saved = JSON.parse(localStorage.getItem(FILTER_STORE));
-        if (Array.isArray(saved)) return new Set(saved);
-      } catch { /* fall through to the default */ }
-      return new Set(FILTERS.map((f) => f.key));
-    }
-
-    const enabled = loadEnabled();
-
-    function saveEnabled() {
-      try {
-        localStorage.setItem(FILTER_STORE, JSON.stringify([...enabled]));
-      } catch { /* private mode, keep the in-memory state */ }
-    }
+    const buttons = new Map();
+    // The backend holds the filter; this mirrors it.
+    const enabled = new Set(FILTERS.map((f) => f.key));
 
     /** Flat list of EFA product.class values to request. The API seam. */
     function selectedClasses() {
@@ -173,27 +398,240 @@
         .sort((a, b) => a - b);
     }
 
+    function showFilters() {
+      buttons.forEach((btn, key) => btn.setAttribute("aria-pressed", String(enabled.has(key))));
+    }
+
+    function applyClasses(classes) {
+      enabled.clear();
+      FILTERS.filter((f) => classes === null || f.classes.some((c) => classes.includes(c)))
+        .forEach((f) => enabled.add(f.key));
+      showFilters();
+    }
+
+    async function loadClasses() {
+      const res = await fetch("/api/classes");
+      if (!res.ok) throw new Error(res.statusText);
+      applyClasses((await res.json()).classes);
+    }
+
+    // Chained so rapid taps reach the backend in order.
+    let sync = Promise.resolve();
+    function saveClasses() {
+      // All buttons on means no filter, so classes outside the buttons still show.
+      const classes = enabled.size === FILTERS.length ? null : selectedClasses();
+      sync = sync.then(async () => {
+        try {
+          const res = await fetch("/api/classes", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ classes }),
+          });
+          if (!res.ok) throw new Error(res.statusText);
+        } catch (e) {
+          status.textContent = "Error saving filter: " + e.message;
+          await loadClasses().catch(() => {});
+          renderLines();
+        }
+      });
+    }
+
     function renderFilters() {
       FILTERS.forEach((f) => {
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = "filter-btn";
-        btn.setAttribute("aria-pressed", String(enabled.has(f.key)));
         btn.setAttribute("aria-label", f.label);
         btn.innerHTML = ICONS[f.key];
         btn.addEventListener("click", () => {
           enabled.has(f.key) ? enabled.delete(f.key) : enabled.add(f.key);
-          btn.setAttribute("aria-pressed", String(enabled.has(f.key)));
-          saveEnabled();
+          // Nothing enabled is not a state: turning off the last one turns all on.
+          if (!enabled.size) FILTERS.forEach((x) => enabled.add(x.key));
+          showFilters();
+          sortLines();
+          renderLines();
+          saveClasses();
         });
+        buttons.set(f.key, btn);
         filtersEl.appendChild(btn);
       });
+      showFilters();
     }
 
     renderFilters();
 
-    // Show the currently selected station on load.
+    // --- lines ---------------------------------------------------------------
+
+    const linesEl = document.getElementById("lines");
+    // Class 0 Ersatzverkehr comes back with the train filter, so it shares that icon.
+    const ICON_BY_CLASS = { 0: "train" };
+    FILTERS.forEach((f) => f.classes.forEach((c) => { ICON_BY_CLASS[c] = f.key; }));
+    // Only the newest request may render, since responses can arrive out of order.
+    let linesSeq = 0;
+    // Line + destination pairs known at the station, with their class.
+    let known = null;
+    // Keys of the chosen pairs. Kept while their class is filtered out.
+    const chosen = new Set();
+
+    const pairKey = (p) => JSON.stringify([p.line, p.dest]);
+
+    async function loadChosen() {
+      const res = await fetch("/api/lines");
+      if (!res.ok) throw new Error(res.statusText);
+      chosen.clear();
+      (await res.json()).lines.forEach((p) => chosen.add(pairKey(p)));
+    }
+
+    // Chained so rapid taps reach the backend in order.
+    let lineSync = Promise.resolve();
+    function saveChosen() {
+      const lines = [...chosen].map((k) => {
+        const [line, dest] = JSON.parse(k);
+        return { line, dest };
+      });
+      lineSync = lineSync.then(async () => {
+        try {
+          const res = await fetch("/api/lines", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ lines }),
+          });
+          if (!res.ok) throw new Error(res.statusText);
+        } catch (e) {
+          status.textContent = "Error saving lines: " + e.message;
+          await loadChosen().catch(() => {});
+          renderLines();
+        }
+      });
+    }
+
+    /** Known pairs whose class passes the class filter. Mirrors efa.class_included. */
+    function visiblePairs() {
+      const all = enabled.size === FILTERS.length;
+      return known.filter((p) => all || enabled.has(ICON_BY_CLASS[p.cls]));
+    }
+
+    // Only choices among visible pairs apply, and none applying means all.
+    // Choosing every visible pair clears just those, so hidden choices survive.
+    function toggleLine(k) {
+      chosen.has(k) ? chosen.delete(k) : chosen.add(k);
+      const keys = visiblePairs().map(pairKey);
+      if (keys.every((key) => chosen.has(key))) keys.forEach((key) => chosen.delete(key));
+      renderLines();
+      saveChosen();
+      scheduleSort();
+    }
+
+    const SETTLE_MS = 5000;
+    // Display order as pair keys. Changes only when sorted, so taps never move rows.
+    let order = [];
+    let settleTimer = null;
+
+    const byLine = (a, b) => a.line.localeCompare(b.line, undefined, { numeric: true }) || a.dest.localeCompare(b.dest);
+
+    /** Chosen visible pairs first, each group by line then destination. */
+    function sortLines() {
+      clearTimeout(settleTimer);
+      settleTimer = null;
+      const rows = visiblePairs().sort(byLine);
+      order = [
+        ...rows.filter((p) => chosen.has(pairKey(p))),
+        ...rows.filter((p) => !chosen.has(pairKey(p))),
+      ].map(pairKey);
+    }
+
+    // Restarted by taps, and by scrolling once a tap started it, so rows move only after a pause.
+    function scheduleSort() {
+      clearTimeout(settleTimer);
+      settleTimer = setTimeout(settle, SETTLE_MS);
+    }
+    linesEl.addEventListener("scroll", () => { if (settleTimer) scheduleSort(); }, { passive: true });
+
+    function settle() {
+      const before = order.join("\n");
+      sortLines();
+      if (order.join("\n") === before) return;
+
+      const oldTops = new Map(
+        [...linesEl.querySelectorAll(".line-row")].map((r) => [r.dataset.key, r.getBoundingClientRect().top])
+      );
+      renderLines();
+      linesEl.scrollTop = 0;
+      if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+      // Animated with transforms inside the scroll container, so moving rows stay clipped to the panel.
+      const rows = [...linesEl.querySelectorAll(".line-row")];
+      rows.forEach((r) => {
+        const old = oldTops.get(r.dataset.key);
+        if (old !== undefined) r.style.transform = `translateY(${old - r.getBoundingClientRect().top}px)`;
+      });
+      linesEl.offsetHeight; // commit the start positions before transitioning
+      rows.forEach((r) => {
+        r.style.transition = "transform 0.25s ease";
+        r.style.transform = "";
+      });
+    }
+
+    function renderLines() {
+      if (!known) return;
+      const pos = new Map(order.map((k, i) => [k, i]));
+      // Pairs missing from the order go last; Infinity - Infinity is NaN, which falls through to byLine.
+      const rows = visiblePairs().sort(
+        (a, b) => (pos.get(pairKey(a)) ?? Infinity) - (pos.get(pairKey(b)) ?? Infinity) || byLine(a, b)
+      );
+      const anyChosen = rows.some((p) => chosen.has(pairKey(p)));
+
+      const scrollTop = linesEl.scrollTop;
+      linesEl.innerHTML = "";
+      if (!rows.length) {
+        linesEl.textContent = known.length ? "No lines for the selected vehicle types." : "No known lines.";
+        return;
+      }
+      rows.forEach((p) => {
+        const k = pairKey(p);
+        const row = document.createElement("button");
+        row.type = "button";
+        row.className = "line-row";
+        row.dataset.key = k;
+        row.setAttribute("aria-pressed", String(!anyChosen || chosen.has(k)));
+        const icon = document.createElement("span");
+        icon.className = "line-icon";
+        icon.innerHTML = ICONS[ICON_BY_CLASS[p.cls]] || "";
+        const line = document.createElement("strong");
+        line.textContent = p.line;
+        const dest = document.createElement("span");
+        dest.textContent = p.dest;
+        row.append(icon, line, dest);
+        row.addEventListener("click", () => toggleLine(k));
+        linesEl.appendChild(row);
+      });
+      // Emptying the list can clamp the scroll position to 0.
+      linesEl.scrollTop = scrollTop;
+    }
+
+    async function loadLines() {
+      const seq = ++linesSeq;
+      try {
+        const res = await fetch("/api/station/lines");
+        if (seq !== linesSeq) return;
+        if (res.status === 409) { known = null; linesEl.textContent = "No station selected."; return; }
+        if (!res.ok) throw new Error(res.statusText);
+        const list = await res.json();
+        if (seq !== linesSeq) return;
+        known = list;
+        sortLines();
+        renderLines();
+      } catch (e) {
+        if (seq === linesSeq) linesEl.textContent = "Error loading lines: " + e.message;
+      }
+    }
+
+    // Show the settings, current station, filters and lines on load.
+    showSettings();
+    loadSettings().catch(() => {});
     fetch("/api/station").then((r) => r.json()).then(showCurrent).catch(() => {});
+    loadClasses().catch(() => {});
+    loadChosen().catch(() => {}).finally(loadLines);
   </script>
 </body>
 </html>

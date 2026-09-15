@@ -26,10 +26,45 @@ class StationState(BaseModel):
     name: str | None = None
 
 
+class ClassFilter(BaseModel):
+    """Vehicle classes departures are restricted to."""
+
+    classes: list[int] | None = Field(
+        None, description="EFA product.class values to include. Null for all."
+    )
+
+
+class OutputSettings(BaseModel):
+    """Power and brightness settings."""
+
+    on: bool = Field(True, description="Whether output is switched on.")
+    brightness: int = Field(100, ge=0, le=100, description="Brightness in percent.")
+
+
+class LineRef(BaseModel):
+    """A line towards one destination."""
+
+    line: str = Field(min_length=1, description='Line number as shown, e.g. "U79".')
+    dest: str = Field(min_length=1, description="Destination, locality prefix stripped.")
+
+
+class KnownLine(LineRef):
+    """A line + destination pair seen at a station."""
+
+    cls: int | None = Field(None, description="EFA product class, e.g. 2 for U-Bahn.")
+
+
+class LineSelection(BaseModel):
+    """Line and destination pairs departures are restricted to."""
+
+    lines: list[LineRef] = Field([], description="Pairs to include. Empty for all.")
+
+
 class Departure(BaseModel):
     """One upcoming departure."""
 
     line: str = Field(description='Line number as shown, e.g. "U72".')
+    cls: int | None = Field(None, description="EFA product class, e.g. 2 for U-Bahn.")
     dest: str = Field(description="Destination, locality prefix stripped.")
     ts: int = Field(description="Departure time, epoch seconds. Realtime if rt.")
     delay: int = Field(0, description="Seconds behind schedule.")

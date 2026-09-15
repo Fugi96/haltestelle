@@ -3,8 +3,8 @@
 Lets a user pick which station to poll departures for. Discovery is organic:
 the user searches, the EFA stopfinder returns candidate stops, the user picks
 one, and that choice is cached locally so it appears as autocomplete next
-time. A background poller (added later) will read the selected station via
-`state.get_station()` and publish departures over MQTT.
+time. A background poller (`poller.py`) fetches departures for the selected
+station and vehicle classes.
 
 Endpoints:
     GET  /                     -> the single-page frontend
@@ -13,6 +13,13 @@ Endpoints:
     GET  /api/stations/lookup  -> online lookup via EFA (adds nothing itself)
     POST /api/station          -> select a station (sets current + caches it)
     GET  /api/station          -> the currently selected station
+    GET  /api/station/lines    -> line + destination pairs known at that station
+    GET  /api/classes          -> the vehicle classes departures are filtered to
+    PUT  /api/classes          -> set those classes (null for all)
+    GET  /api/lines            -> the line + destination pairs to include
+    PUT  /api/lines            -> set those pairs (empty for all)
+    GET  /api/settings         -> power and brightness
+    PUT  /api/settings         -> store power and brightness
     GET  /api/departures       -> departures for the selected station
 
 Run (from the `backend/` directory):
@@ -20,8 +27,9 @@ Run (from the `backend/` directory):
     uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 """
 
+import asyncio
 import os
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 import httpx
@@ -29,8 +37,17 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import db, efa, state
-from .models import DepartureBoard, StationCandidate, StationSelection, StationState
+from . import db, efa, poller, state
+from .models import (
+    ClassFilter,
+    DepartureBoard,
+    KnownLine,
+    LineSelection,
+    OutputSettings,
+    StationCandidate,
+    StationSelection,
+    StationState,
+)
 
 # Where the frontend files live. Defaults to the sibling `frontend/` folder in
 # the repo, but is overridable via env var so the path can differ in Docker.
@@ -38,11 +55,18 @@ FRONTEND_DIR = Path(
     os.environ.get("FRONTEND_DIR", Path(__file__).resolve().parents[2] / "frontend")
 )
 
+# Departures scanned to learn a station's lines. Lines absent from them stay unknown.
+LINE_SEED_LIMIT = 300
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init_db()
+    task = asyncio.create_task(poller.run())
     yield
+    task.cancel()
+    with suppress(asyncio.CancelledError):
+        await task
 
 
 app = FastAPI(title="Haltestelle", version="0.2.0", lifespan=lifespan)
@@ -100,7 +124,23 @@ def select_station(selection: StationSelection):
     This is the single "command" today. If more actions arrive later (clear
     display, change interval, …), a small command dispatcher would slot in here.
     """
+    # Learned once per station. Fetched before saving, so a failure changes nothing.
+    new_lines = []
+    if not db.station_lines(selection.id):
+        try:
+            board = efa.fetch_departures(selection.id, limit=LINE_SEED_LIMIT)
+        except httpx.HTTPError as exc:
+            raise HTTPException(status_code=502, detail=f"Line lookup failed: {exc}")
+        new_lines = [
+            {"line": d["line"], "dest": d["dest"], "cls": d["cls"]}
+            for d in board["departures"]
+        ]
+
     db.upsert_station(selection.model_dump())
+    db.add_lines(selection.id, new_lines)
+    # Chosen lines belong to one station.
+    if (state.get_station() or {}).get("id") != selection.id:
+        state.set_lines([])
     state.set_station(selection.id, selection.name)
     return StationState(**(state.get_station() or {}))
 
@@ -112,16 +152,84 @@ def read_station():
     return StationState(**current) if current else StationState()
 
 
-@app.get("/api/departures", response_model=DepartureBoard)
-def read_departures(limit: int = Query(8, ge=1, le=30)):
-    """Departures for the currently selected station.
+@app.get("/api/station/lines", response_model=list[KnownLine])
+def read_station_lines():
+    """Line + destination pairs known at the selected station."""
+    current = state.get_station()
+    if not current:
+        raise HTTPException(status_code=409, detail="No station selected.")
+    return db.station_lines(current["id"])
 
-    Same payload the poller will publish, so it can be inspected directly.
+
+@app.get("/api/classes", response_model=ClassFilter)
+def read_classes():
+    """Return the vehicle classes departures are filtered to."""
+    return ClassFilter(classes=state.get_classes())
+
+
+@app.put("/api/classes", response_model=ClassFilter)
+def select_classes(selection: ClassFilter):
+    """Set the vehicle classes to include. Null clears the filter."""
+    state.set_classes(selection.classes)
+    return ClassFilter(classes=state.get_classes())
+
+
+@app.get("/api/lines", response_model=LineSelection)
+def read_lines():
+    """Return the line + destination pairs departures are restricted to."""
+    return LineSelection.model_validate({"lines": state.get_lines()})
+
+
+@app.put("/api/lines", response_model=LineSelection)
+def select_lines(selection: LineSelection):
+    """Set the line + destination pairs to include. Empty clears the filter.
+
+    Pairs not known at the selected station are dropped.
+    """
+    current = state.get_station()
+    known = (
+        {(p["line"], p["dest"]) for p in db.station_lines(current["id"])}
+        if current
+        else set()
+    )
+    state.set_lines(
+        [pair.model_dump() for pair in selection.lines if (pair.line, pair.dest) in known]
+    )
+    return LineSelection.model_validate({"lines": state.get_lines()})
+
+
+@app.get("/api/settings", response_model=OutputSettings)
+def read_settings():
+    """Return the power and brightness settings. Unset ones take their defaults."""
+    stored = {
+        name: value
+        for name in OutputSettings.model_fields
+        if (value := db.read_setting(name)) is not None
+    }
+    return OutputSettings.model_validate(stored)
+
+
+@app.put("/api/settings", response_model=OutputSettings)
+def write_settings(settings: OutputSettings):
+    """Store the power and brightness settings. Persisted in SQLite."""
+    for name, value in settings.model_dump().items():
+        db.write_setting(name, value)
+    return settings
+
+
+@app.get("/api/departures", response_model=DepartureBoard)
+def read_departures(limit: int = Query(poller.LIMIT, ge=1, le=200)):
+    """Departures for the selected station, classes and lines.
+
+    Built exactly as the poller builds them, so they can be inspected directly.
     """
     current = state.get_station()
     if not current:
         raise HTTPException(status_code=409, detail="No station selected.")
     try:
-        return efa.fetch_departures(current["id"], limit=limit)
+        board, _ = poller.build_board(
+            current["id"], state.get_classes(), state.get_lines(), limit
+        )
+        return board
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"Departure lookup failed: {exc}")

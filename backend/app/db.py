@@ -12,6 +12,7 @@ connections keep things simple and safe. A single write lock serialises the
 (rare) writes.
 """
 
+import json
 import os
 import sqlite3
 from pathlib import Path
@@ -48,6 +49,17 @@ def init_db() -> None:
             """
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_stations_name ON stations(name)")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS lines (
+                station_id TEXT NOT NULL,      -- stations.id
+                line       TEXT NOT NULL,      -- e.g. "U79"
+                dest       TEXT NOT NULL,      -- locality prefix stripped
+                cls        INTEGER,            -- EFA product class
+                PRIMARY KEY (station_id, line, dest)
+            )
+            """
+        )
         conn.execute("""
                      CREATE TABLE IF NOT EXISTS settings(
                         setting TEXT PRIMARY KEY, -- name of the setting
@@ -102,3 +114,45 @@ def search_stations(query: str, limit: int = 8) -> list[dict]:
             (like, like, limit),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def read_setting(name: str):
+    """A stored setting, JSON-decoded, or None if unset."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT value FROM settings WHERE setting = ?", (name,)
+        ).fetchone()
+    return json.loads(row["value"]) if row and row["value"] is not None else None
+
+
+def write_setting(name: str, value) -> None:
+    """Store a setting as JSON."""
+    with _write_lock, _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO settings (setting, value) VALUES (?, ?)
+            ON CONFLICT(setting) DO UPDATE SET value = excluded.value
+            """,
+            (name, json.dumps(value)),
+        )
+
+
+def station_lines(station_id: str) -> list[dict]:
+    """Line + destination pairs known at a station."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT line, dest, cls FROM lines WHERE station_id = ?", (station_id,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def add_lines(station_id: str, lines: list[dict]) -> None:
+    """Remember line + destination pairs seen at a station. Known pairs are kept."""
+    with _write_lock, _connect() as conn:
+        conn.executemany(
+            """
+            INSERT OR IGNORE INTO lines (station_id, line, dest, cls)
+            VALUES (:station_id, :line, :dest, :cls)
+            """,
+            [{"station_id": station_id, **pair} for pair in lines],
+        )

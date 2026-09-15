@@ -76,6 +76,16 @@ _LOCALITY_PREFIX = re.compile(r"^[A-ZÄÖÜ]{1,3}-")
 # Some infoLinks carry only a link label ("Hier alle Infos"), not real text.
 _MIN_ALERT_LEN = 40
 
+# Including any of these also returns class 0, Ersatzverkehr.
+_RAIL_CLASSES = {13, 14, 15, 16}
+
+
+def class_included(cls: int | None, classes: list[int] | None) -> bool:
+    """Whether departures of class `cls` come back under this class filter."""
+    if classes is None:
+        return True
+    return cls in classes or (cls == 0 and not _RAIL_CLASSES.isdisjoint(classes))
+
 
 def _epoch(stamp: str) -> int:
     """EFA UTC timestamp -> epoch seconds."""
@@ -102,10 +112,14 @@ def _strip_html(text: str) -> str:
     return re.sub(r"\s+", " ", html.unescape(text)).strip()
 
 
-def fetch_departures(station_id: str, limit: int = 8) -> dict:
+def fetch_departures(
+    station_id: str, limit: int = 8, classes: list[int] | None = None
+) -> dict:
     """Fetch upcoming departures for a stop, trimmed to the useful fields.
 
     `station_id` is an EFA global id (DHID) as returned by `search_locations`.
+    `classes` restricts to those EFA product classes; None means all. `limit`
+    counts after that filter.
 
     The raw response runs ~30 kB for eight departures, mostly nested location
     records and HTML notices repeated per event; this reduces it to roughly
@@ -114,6 +128,10 @@ def fetch_departures(station_id: str, limit: int = 8) -> dict:
 
     Raises httpx.HTTPError on network or HTTP failures.
     """
+    # No includedMeans at all would mean every class, the opposite of empty.
+    if classes is not None and not classes:
+        return {"station": None, "gen": int(time.time()), "departures": [], "alerts": []}
+
     params = {
         "outputFormat": "rapidJSON",
         "mode": "direct",
@@ -124,6 +142,9 @@ def fetch_departures(station_id: str, limit: int = 8) -> dict:
         "limit": str(limit),
         "itdDate": dt.date.today().strftime("%Y%m%d"),
     }
+    if classes is not None:
+        # Must repeat the parameter; "4,5" matches nothing.
+        params["includedMeans"] = [str(c) for c in classes] # type: ignore
     resp = httpx.get(f"{EFA_BASE_URL}/XML_DM_REQUEST", params=params, timeout=_TIMEOUT)
     resp.raise_for_status()
     events = resp.json().get("stopEvents") or []
@@ -146,6 +167,7 @@ def fetch_departures(station_id: str, limit: int = 8) -> dict:
         departures.append(
             {
                 "line": transport["number"],
+                "cls": transport.get("product", {}).get("class"),
                 "dest": _clean_name(transport["destination"]["name"]),
                 "ts": _epoch(estimated or planned),
                 "delay": _epoch(estimated) - _epoch(planned) if estimated else 0,
