@@ -8,6 +8,7 @@ time. A background poller (added later) will read the selected station via
 
 Endpoints:
     GET  /                     -> the single-page frontend
+    GET  /assets/*             -> frontend images
     GET  /api/stations?q=      -> autocomplete over locally-known stations
     GET  /api/stations/lookup  -> online lookup via EFA (adds nothing itself)
     POST /api/station          -> select a station (sets current + caches it)
@@ -26,6 +27,7 @@ from pathlib import Path
 import httpx
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
 from . import db, efa, state
 from .models import DepartureBoard, StationCandidate, StationSelection, StationState
@@ -44,6 +46,13 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Haltestelle", version="0.2.0", lifespan=lifespan)
+
+# Images referenced by the frontend. Guarded so a missing folder doesn't stop
+# the API from starting.
+if (FRONTEND_DIR / "assets").is_dir():
+    app.mount(
+        "/assets", StaticFiles(directory=FRONTEND_DIR / "assets"), name="assets"
+    )
 
 
 @app.get("/")

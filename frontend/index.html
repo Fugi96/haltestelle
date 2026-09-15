@@ -19,6 +19,23 @@
     #current { margin-top: 1rem; font-weight: 600; }
     #status { color: #666; min-height: 1.2em; }
     .hint { color: #999; font-size: 0.85rem; }
+
+    #filters {
+      display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center;
+      gap: 0.4rem; margin: 1.6rem 0; padding: 0.7rem 0.9rem;
+      border: 1px solid #ddd; border-radius: 14px;
+    }
+    .filter-btn {
+      /* The logo is the button. Common height, natural width per logo. */
+      height: 2.9rem;
+      display: flex; align-items: center; justify-content: center;
+      padding: 0; border: none; background: none; cursor: pointer;
+      touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+      transition: filter 0.15s, opacity 0.15s, transform 0.08s;
+    }
+    .filter-btn img { height: 100%; width: auto; max-width: 5rem; display: block; }
+    .filter-btn[aria-pressed="false"] { filter: saturate(0.2); opacity: 0.45; }
+    .filter-btn:active { transform: scale(0.92); }
   </style>
 </head>
 <body>
@@ -33,6 +50,8 @@
 
   <p id="status"></p>
   <p id="current"></p>
+
+  <div id="filters"></div>
 
   <script>
     const q = document.getElementById("q");
@@ -106,6 +125,72 @@
         status.textContent = "Error: " + e.message;
       }
     });
+
+    // --- vehicle class filters ---------------------------------------------
+
+    // Operator marks are the Wikimedia Commons originals; tram and bus are ours.
+    const ICONS = {
+      sbahn: '<img src="/assets/sbahn.svg" alt="">',
+      ubahn: '<img src="/assets/ubahn.svg" alt="">',
+      tram: '<img src="/assets/tram.svg" alt="">',
+      bus: '<img src="/assets/bus.svg" alt="">',
+      train: '<img src="/assets/db.svg" alt="">',
+    };
+
+    // `classes` are EFA product.class values. Excluding 13-16 also drops the
+    // class 0 Ersatzverkehr umbrella, so it needs no button of its own.
+    const FILTERS = [
+      { key: "sbahn", label: "S-Bahn", classes: [1] },
+      { key: "ubahn", label: "U-Bahn", classes: [2] },
+      { key: "tram", label: "Tram", classes: [4] },
+      { key: "bus", label: "Bus", classes: [5, 7] },
+      { key: "train", label: "Zug", classes: [13, 14, 15, 16] },
+    ];
+
+    const FILTER_STORE = "haltestelle.filters";
+    const filtersEl = document.getElementById("filters");
+
+    function loadEnabled() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(FILTER_STORE));
+        if (Array.isArray(saved)) return new Set(saved);
+      } catch { /* fall through to the default */ }
+      return new Set(FILTERS.map((f) => f.key));
+    }
+
+    const enabled = loadEnabled();
+
+    function saveEnabled() {
+      try {
+        localStorage.setItem(FILTER_STORE, JSON.stringify([...enabled]));
+      } catch { /* private mode, keep the in-memory state */ }
+    }
+
+    /** Flat list of EFA product.class values to request. The API seam. */
+    function selectedClasses() {
+      return FILTERS.filter((f) => enabled.has(f.key))
+        .flatMap((f) => f.classes)
+        .sort((a, b) => a - b);
+    }
+
+    function renderFilters() {
+      FILTERS.forEach((f) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "filter-btn";
+        btn.setAttribute("aria-pressed", String(enabled.has(f.key)));
+        btn.setAttribute("aria-label", f.label);
+        btn.innerHTML = ICONS[f.key];
+        btn.addEventListener("click", () => {
+          enabled.has(f.key) ? enabled.delete(f.key) : enabled.add(f.key);
+          btn.setAttribute("aria-pressed", String(enabled.has(f.key)));
+          saveEnabled();
+        });
+        filtersEl.appendChild(btn);
+      });
+    }
+
+    renderFilters();
 
     // Show the currently selected station on load.
     fetch("/api/station").then((r) => r.json()).then(showCurrent).catch(() => {});

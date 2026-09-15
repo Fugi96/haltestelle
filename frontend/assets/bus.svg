@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 116 115" role="img" aria-label="Bus">
+  <!-- Windows and lamps are cut out, so the icon sits on any background. -->
+  <mask id="bus">
+    <rect width="116" height="115" fill="#000"/>
+    <!-- Body: wide shallow curve across the roof, near-flat floor. -->
+    <path d="M36 0H80A24 6 0 0 1 104 6V104A2 2 0 0 1 102 106H14A2 2 0 0 1 12 104V6A24 6 0 0 1 36 0Z" fill="#fff"/>
+    <!-- Mirrors: arm out from the body, stem down, head hanging below. -->
+    <rect x="4" y="29" width="9" height="3" fill="#fff"/>
+    <rect x="4" y="31" width="2" height="5" fill="#fff"/>
+    <rect x="1" y="35" width="8" height="18" rx="2" fill="#fff"/>
+    <rect x="103" y="29" width="9" height="3" fill="#fff"/>
+    <rect x="110" y="31" width="2" height="5" fill="#fff"/>
+    <rect x="107" y="35" width="8" height="18" rx="2" fill="#fff"/>
+    <rect x="16" y="102" width="14" height="12" rx="2" fill="#fff"/>
+    <rect x="86" y="102" width="14" height="12" rx="2" fill="#fff"/>
+    <rect x="30" y="6" width="56" height="10" rx="5" fill="#000"/>
+    <!-- Windshield: tight corners on top, deep sweep along the bottom. -->
+    <path d="M19 23H97A2 2 0 0 1 99 25V69A28 10 0 0 1 71 79H45A28 10 0 0 1 17 69V25A2 2 0 0 1 19 23Z" fill="#000"/>
+    <rect x="18" y="85" width="24" height="9" rx="4.5" fill="#000"/>
+    <rect x="74" y="85" width="24" height="9" rx="4.5" fill="#000"/>
+    <rect x="44" y="98" width="28" height="5" rx="2.5" fill="#000"/>
+  </mask>
+  <rect width="116" height="115" fill="#A3197E" mask="url(#bus)"/>
+</svg>
