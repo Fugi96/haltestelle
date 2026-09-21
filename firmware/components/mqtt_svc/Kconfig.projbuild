@@ -1,0 +1,21 @@
+menu "mqtt_svc Configuration"
+
+    config MQTT_SVC_BROKER_URI
+        string "MQTT Broker Uri"
+        default "local.mybrokeruri"
+        help
+            Uri of the broker that the esp shall connect to within the network.
+            Of form "mqtt://<hostname>.local:<port>".
+
+    config MQTT_SVC_USERNAME
+        string "MQTT Username"
+        default "myusername"
+        help
+            Username of the MQTT client used for authentication.
+    
+    config MQTT_SVC_PASSWORD
+        string "MQTT Password"
+        default "mypassword"
+        help
+            MQTT password used to authenticate at the broker.
+endmenu

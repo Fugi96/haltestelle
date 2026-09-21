@@ -17,3 +17,10 @@ backend/config.toml
 
 # Local notes
 efa_api_documentation.txt
+
+## ESP-IDF
+build/
+managed_components/
+sdkconfig
+sdkconfig.old
+.cache

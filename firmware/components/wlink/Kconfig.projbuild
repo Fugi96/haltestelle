@@ -1,0 +1,15 @@
+menu "wlink Station Configuration"
+
+    config WLINK_STA_SSID
+        string "Wi-Fi SSID"
+        default "myssid"
+        help
+            SSID (network name) of the access point to connect to.
+
+    config WLINK_STA_PASSWORD
+        string "Wi-Fi Password"
+        default "mypassword"
+        help
+            WPA2 password of the access point. Leave empty for an open network.
+
+endmenu
