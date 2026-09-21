@@ -199,29 +199,32 @@
     const brightInput = document.getElementById("brightness");
     const brightValue = document.getElementById("brightness-value");
     // The backend holds these; this mirrors it.
-    const settings = { on: true, brightness: 100 };
+    const power = { on: true };
+    const settings = { brightness: 100 };
 
     function showSettings() {
-      document.body.classList.toggle("off", !settings.on);
-      powerBtn.setAttribute("aria-pressed", String(settings.on));
+      document.body.classList.toggle("off", !power.on);
+      powerBtn.setAttribute("aria-pressed", String(power.on));
       brightInput.value = settings.brightness;
       brightValue.textContent = settings.brightness + "%";
     }
 
     async function loadSettings() {
-      const res = await fetch("/api/settings");
-      if (!res.ok) throw new Error(res.statusText);
-      Object.assign(settings, await res.json());
+      const [powerRes, settingsRes] = await Promise.all([fetch("/api/power"), fetch("/api/settings")]);
+      if (!powerRes.ok) throw new Error(powerRes.statusText);
+      if (!settingsRes.ok) throw new Error(settingsRes.statusText);
+      Object.assign(power, await powerRes.json());
+      Object.assign(settings, await settingsRes.json());
       showSettings();
     }
 
     // Chained so rapid changes reach the backend in order.
     let settingsSync = Promise.resolve();
-    function saveSettings() {
-      const body = JSON.stringify(settings);
+    function saveSettings(url, state) {
+      const body = JSON.stringify(state);
       settingsSync = settingsSync.then(async () => {
         try {
-          const res = await fetch("/api/settings", {
+          const res = await fetch(url, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body,
@@ -240,9 +243,9 @@
     }
 
     powerBtn.addEventListener("click", () => {
-      settings.on = !settings.on;
+      power.on = !power.on;
       showSettings();
-      saveSettings();
+      saveSettings("/api/power", power);
     });
     brightBtn.addEventListener("click", () => showBrightness(brightPanel.hidden));
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") showBrightness(false); });
@@ -250,7 +253,7 @@
     brightInput.addEventListener("input", () => { brightValue.textContent = brightInput.value + "%"; });
     brightInput.addEventListener("change", () => {
       settings.brightness = Number(brightInput.value);
-      saveSettings();
+      saveSettings("/api/settings", settings);
     });
 
     // --- station ---------------------------------------------------------------

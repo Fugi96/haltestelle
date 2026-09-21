@@ -18,8 +18,10 @@ Endpoints:
     PUT  /api/classes          -> set those classes (null for all)
     GET  /api/lines            -> the line + destination pairs to include
     PUT  /api/lines            -> set those pairs (empty for all)
-    GET  /api/settings         -> power and brightness
-    PUT  /api/settings         -> store power and brightness
+    GET  /api/power            -> whether output is on
+    PUT  /api/power            -> switch output on or off
+    GET  /api/settings         -> output settings (brightness)
+    PUT  /api/settings         -> store output settings
     GET  /api/departures       -> departures for the selected station
 
 Run (from the `backend/` directory):
@@ -37,13 +39,14 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import db, efa, poller, state
+from . import db, efa, mqtt, poller, state
 from .models import (
     ClassFilter,
     DepartureBoard,
     KnownLine,
     LineSelection,
     OutputSettings,
+    Power,
     StationCandidate,
     StationSelection,
     StationState,
@@ -62,11 +65,14 @@ LINE_SEED_LIMIT = 300
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init_db()
-    task = asyncio.create_task(poller.run())
+    _publish_power(_stored(Power))
+    _publish_settings(_stored(OutputSettings))
+    tasks = [asyncio.create_task(mqtt.publisher.run()), asyncio.create_task(poller.run())]
     yield
-    task.cancel()
-    with suppress(asyncio.CancelledError):
-        await task
+    for task in reversed(tasks):
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
 
 
 app = FastAPI(title="Haltestelle", version="0.2.0", lifespan=lifespan)
@@ -198,22 +204,54 @@ def select_lines(selection: LineSelection):
     return LineSelection.model_validate({"lines": state.get_lines()})
 
 
-@app.get("/api/settings", response_model=OutputSettings)
-def read_settings():
-    """Return the power and brightness settings. Unset ones take their defaults."""
+def _stored(model):
+    """A settings model read from SQLite. Unset fields take their defaults."""
     stored = {
         name: value
-        for name in OutputSettings.model_fields
+        for name in model.model_fields
         if (value := db.read_setting(name)) is not None
     }
-    return OutputSettings.model_validate(stored)
+    return model.model_validate(stored)
+
+
+def _store(settings) -> None:
+    for name, value in settings.model_dump().items():
+        db.write_setting(name, value)
+
+
+def _publish_power(power: Power) -> None:
+    mqtt.publisher.publish(mqtt.POWER_TOPIC, "on" if power.on else "off")
+
+
+def _publish_settings(settings: OutputSettings) -> None:
+    mqtt.publisher.publish(mqtt.SETTINGS_TOPIC, settings.model_dump_json())
+
+
+@app.get("/api/power", response_model=Power)
+def read_power():
+    """Return whether output is switched on."""
+    return _stored(Power)
+
+
+@app.put("/api/power", response_model=Power)
+def write_power(power: Power):
+    """Switch output on or off. Persisted in SQLite and published."""
+    _store(power)
+    _publish_power(power)
+    return power
+
+
+@app.get("/api/settings", response_model=OutputSettings)
+def read_settings():
+    """Return the output settings. Unset ones take their defaults."""
+    return _stored(OutputSettings)
 
 
 @app.put("/api/settings", response_model=OutputSettings)
 def write_settings(settings: OutputSettings):
-    """Store the power and brightness settings. Persisted in SQLite."""
-    for name, value in settings.model_dump().items():
-        db.write_setting(name, value)
+    """Store the output settings. Persisted in SQLite and published as a whole."""
+    _store(settings)
+    _publish_settings(settings)
     return settings
 
 
@@ -227,9 +265,8 @@ def read_departures(limit: int = Query(poller.LIMIT, ge=1, le=200)):
     if not current:
         raise HTTPException(status_code=409, detail="No station selected.")
     try:
-        board, _ = poller.build_board(
+        return poller.build_board(
             current["id"], state.get_classes(), state.get_lines(), limit
         )
-        return board
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"Departure lookup failed: {exc}")

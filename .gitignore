@@ -13,6 +13,7 @@ data/
 
 # Env / secrets
 .env
+backend/config.toml
 
 # Local notes
 efa_api_documentation.txt

@@ -1,0 +1,19 @@
+# Copy to config.toml and adjust. Every key is optional; these are the defaults.
+# Another file can be used via the CONFIG_PATH environment variable.
+
+[mqtt]
+host = "localhost"
+port = 1883
+username = ""
+password = ""
+# Topics are <prefix>/<name>.
+prefix = "haltestelle"
+qos = 1
+# Seconds between connection attempts.
+reconnect_delay = 5
+
+[mqtt.topics]
+departures = "departures"
+power = "power"
+settings = "settings"
+status = "status"

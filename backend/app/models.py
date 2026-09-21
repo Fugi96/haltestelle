@@ -34,10 +34,15 @@ class ClassFilter(BaseModel):
     )
 
 
-class OutputSettings(BaseModel):
-    """Power and brightness settings."""
+class Power(BaseModel):
+    """Whether output is switched on."""
 
-    on: bool = Field(True, description="Whether output is switched on.")
+    on: bool = True
+
+
+class OutputSettings(BaseModel):
+    """Output settings."""
+
     brightness: int = Field(100, ge=0, le=100, description="Brightness in percent.")
 
 
