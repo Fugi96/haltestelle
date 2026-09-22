@@ -2,11 +2,9 @@
 #include "driver/i2c_master.h"
 #include "driver/i2c_types.h"
 #include "esp_err.h"
-#include <math.h>
 #include <stdint.h>
-#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-#include "font.h"
 
 #define SSD1306_WIDTH    128
 #define SSD1306_HEIGHT   64
@@ -15,8 +13,6 @@
 #define SSD1306_FB_SIZE  (SSD1306_WIDTH * SSD1306_HEIGHT / 8)   // 1024
 #define SSD1306_CTRL_DATA  0x40
 
-#define CHARACTER_PX_HEIGHT_PAGES 2
-#define CHARACTER_PX_WIDTH 12
 #define I2C_TIMEOUT_MS 100
 
 struct ssd1306_dev {
@@ -76,9 +72,35 @@ esp_err_t ssd1306_init(i2c_master_dev_handle_t i2c, ssd1306_handle_t *h) {
 }
 
 
-esp_err_t ssd1306_flush(ssd1306_handle_t h) {
-    if (h == NULL) return ESP_ERR_INVALID_ARG;
+esp_err_t ssd1306_flush(ssd1306_handle_t h, const uint8_t *buf, int width, int height) {
+    if (h == NULL || buf == NULL) return ESP_ERR_INVALID_ARG;
+    if (width != SSD1306_WIDTH || height != SSD1306_HEIGHT) return ESP_ERR_INVALID_SIZE;
+
+    // Rows of horizontal bytes become pages of vertical bytes, bit 0 on top.
+    int stride = (width + 7) / 8;
+    memset(h->fb, 0x00, SSD1306_FB_SIZE);
+    for (int y = 0; y < SSD1306_HEIGHT; y++) {
+        const uint8_t *row = &buf[y * stride];
+        uint8_t *page = &h->fb[(y / SSD1306_PAGE_HEIGHT) * SSD1306_WIDTH];
+        uint8_t bit = 0x01 << (y % SSD1306_PAGE_HEIGHT);
+        for (int x = 0; x < SSD1306_WIDTH; x++)
+            if (row[x / 8] & (0x80 >> (x % 8)))
+                page[x] |= bit;
+    }
+
     return i2c_master_transmit(h->i2c, &h->ctrl, 1 + SSD1306_FB_SIZE, I2C_TIMEOUT_MS);
+}
+
+esp_err_t ssd1306_set_contrast(ssd1306_handle_t h, uint8_t contrast) {
+    if (h == NULL) return ESP_ERR_INVALID_ARG;
+    const uint8_t cmd[] = { 0x00, 0x81, contrast };
+    return i2c_master_transmit(h->i2c, cmd, sizeof(cmd), I2C_TIMEOUT_MS);
+}
+
+esp_err_t ssd1306_set_power(ssd1306_handle_t h, bool on) {
+    if (h == NULL) return ESP_ERR_INVALID_ARG;
+    const uint8_t cmd[] = { 0x00, on ? 0xAF : 0xAE };
+    return i2c_master_transmit(h->i2c, cmd, sizeof(cmd), I2C_TIMEOUT_MS);
 }
 
 void ssd1306_deinit(ssd1306_handle_t h) {
@@ -86,134 +108,4 @@ void ssd1306_deinit(ssd1306_handle_t h) {
     static const uint8_t shut_down[] = { 0x00, 0xAE };
     i2c_master_transmit(h->i2c, shut_down, sizeof(shut_down), 100);
     free(h);
-}
-
-void ssd1306_clear(ssd1306_handle_t h) {
-    memset(&h->fb, 0x00, SSD1306_FB_SIZE);
-}
-
-void ssd1306_set_pixel(ssd1306_handle_t h, int x, int y, bool on) {
-    if (x < 0 || x >= SSD1306_WIDTH || y < 0 || y >= SSD1306_HEIGHT)
-        return;
-
-    int index = (y / SSD1306_PAGE_HEIGHT) * SSD1306_WIDTH + x;
-    uint8_t bit = 0x01 << (y % 8);
-
-    if (on)
-        h->fb[index] |= bit;
-    else
-        h->fb[index] &= ~bit;
-}
-
-void ssd1306_draw_number(ssd1306_handle_t h, int number, int start_page, int start_column) {
-    char digits[12];
-    int n = snprintf(digits, sizeof(digits), "%d", number);
-    if (n <= 0) return;
-
-    int col = start_column;
-    for (int i = 0; i < n; i++) {
-        char c = digits[i];
-        if (c < '0' || c > '9') {
-            col += CHARACTER_PX_WIDTH;
-            continue;
-        }
-        int d = c - '0';
-
-        for (int page = 0; page < CHARACTER_PX_HEIGHT_PAGES; page++) {
-            for (int x = 0; x < CHARACTER_PX_WIDTH; x++) {
-                int index = (start_page + page) * SSD1306_WIDTH + (col + x);
-                if (index >= 0 && index < SSD1306_FB_SIZE)
-                    h->fb[index] |= font[d][page][x];
-            }
-        }
-        col += CHARACTER_PX_WIDTH;
-    }
-}
-
-void ssd1306_draw_number_centered(ssd1306_handle_t h, int number, int start_page) {
-    int width = 0;
-    int n = number;
-    if (n <= 0) width = 1;
-    while (n != 0) {
-        n /= 10;
-        width++;
-    }
-    int px_width = width*CHARACTER_PX_WIDTH + (width - 1); // The width - 1 constant is for 1 px spaces between chars
-    int x_pos = SSD1306_WIDTH/2 - px_width/2;
-    ssd1306_draw_number(h, number, start_page, x_pos);
-}
-
-void ssd1306_draw_string(ssd1306_handle_t h, const char* str, int start_page, int start_column) {
-    int col = start_column;
-
-    for (int i = 0; str[i] != '\0'; i++) {
-        int idx = font_index(str[i]);
-        if (idx < 0) {
-            col += CHARACTER_PX_WIDTH;
-            continue;
-        }
-
-        for (int page = 0; page < CHARACTER_PX_HEIGHT_PAGES; page++) {
-            for (int x = 0; x < CHARACTER_PX_WIDTH; x++) {
-                int index = (start_page + page) * SSD1306_WIDTH + (col + x);
-                if (index >= 0 && index < SSD1306_FB_SIZE)
-                    h->fb[index] |= font[idx][page][x];
-            }
-        }
-        col += CHARACTER_PX_WIDTH;
-    }
-}
-
-void ssd1306_draw_string_centered(ssd1306_handle_t h, const char* str, int start_page) {
-    int len = strlen(str);
-    if (len == 0) return;
-
-    int px_width = len * CHARACTER_PX_WIDTH + (len - 1);
-    int x_pos = SSD1306_WIDTH / 2 - px_width / 2;
-    ssd1306_draw_string(h, str, start_page, x_pos);
-}
-
-void ssd1306_draw_line(ssd1306_handle_t h, int x0, int y0, int x1, int y1, bool on) {
-    int dx = abs(x1 - x0);
-    int dy = -abs(y1 - y0);
-    int sx = x0 < x1 ? 1 : -1;
-    int sy = y0 < y1 ? 1 : -1;
-    int err = dx + dy;
-
-    for (;;) {
-        ssd1306_set_pixel(h, x0, y0, on);
-        if (x0 == x1 && y0 == y1) break;
-        int e2 = 2 * err;
-        if (e2 >= dy) { err += dy; x0 += sx; }
-        if (e2 <= dx) { err += dx; y0 += sy; }
-    }
-}
-
-void ssd1306_draw_rectangle(ssd1306_handle_t h, int x0, int y0, int x1, int y1, bool on) {
-    ssd1306_draw_line(h, x0, y0, x1, y0, on);
-    ssd1306_draw_line(h, x1, y0, x1, y1, on);
-    ssd1306_draw_line(h, x1, y1, x0, y1, on);
-    ssd1306_draw_line(h, x0, y1, x0, y0, on);
-}
-
-void ssd1306_draw_arc(ssd1306_handle_t h, int cx, int cy, int radius, float start_deg, float end_deg, int thickness, bool on) {
-    if (thickness < 1) thickness = 1;
-
-    int outer = radius + thickness - 1;
-    
-    float step = 25.0f / (float) outer;
-
-    if (step <= 0.0f) step = 1.0f;
-
-    for (float deg = start_deg; deg <= end_deg; deg += step) {
-        float rad = deg * (float)M_PI / 180.0f;
-        float c = cosf(rad);
-        float s = sinf(rad);
-
-        for (int r = radius; r < radius + thickness; r++) {
-            int x = cx + (int)lroundf(r * c);
-            int y = cy - (int)lroundf(r * s);
-            ssd1306_set_pixel(h, x, y, on);
-        }
-    }
 }
