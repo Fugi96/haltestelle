@@ -251,6 +251,7 @@ err_destroy_client:
 }
 
 esp_err_t mqtt_svc_connect(void) {
+    ESP_RETURN_ON_FALSE(s_client != NULL, ESP_ERR_INVALID_STATE, TAG, "not initialized");
     if (mqtt_svc_is_connected())
         return ESP_OK;
 
@@ -287,6 +288,10 @@ esp_err_t mqtt_svc_connect(void) {
 
 int mqtt_svc_publish(const char *topic, const void *payload, size_t len, int qos, bool retain)
 {
+    if (s_client == NULL) {
+        ESP_LOGE(TAG, "publish: not initialized");
+        return -1;
+    }
     int msg_id = esp_mqtt_client_publish(s_client, topic, payload, (int)len, qos, (int)retain);
     if (msg_id < 0)
         ESP_LOGE(TAG, "publish rejected by client: topic=\"%s\" qos=%d len=%u", topic, qos, (unsigned)len);
@@ -295,6 +300,7 @@ int mqtt_svc_publish(const char *topic, const void *payload, size_t len, int qos
 
 esp_err_t mqtt_svc_flush(uint32_t timeout_ms)
 {
+    ESP_RETURN_ON_FALSE(s_client != NULL, ESP_ERR_INVALID_STATE, TAG, "not initialized");
     unsigned expired = atomic_load(&s_expired_count);
     TickType_t start = xTaskGetTickCount();
 
@@ -316,6 +322,7 @@ esp_err_t mqtt_svc_flush(uint32_t timeout_ms)
 
 esp_err_t mqtt_svc_subscribe(const char *filter, int qos, mqtt_svc_msg_cb_t cb, void *ctx)
 {
+    ESP_RETURN_ON_FALSE(s_client != NULL, ESP_ERR_INVALID_STATE, TAG, "not initialized");
     ESP_RETURN_ON_FALSE(filter != NULL && cb != NULL, ESP_ERR_INVALID_ARG, TAG, "filter and cb are required");
 
     char *copy = strdup(filter);
@@ -351,6 +358,7 @@ esp_err_t mqtt_svc_subscribe(const char *filter, int qos, mqtt_svc_msg_cb_t cb, 
 
 esp_err_t mqtt_svc_unsubscribe(const char *filter)
 {
+    ESP_RETURN_ON_FALSE(s_client != NULL, ESP_ERR_INVALID_STATE, TAG, "not initialized");
     ESP_RETURN_ON_FALSE(filter != NULL, ESP_ERR_INVALID_ARG, TAG, "filter is required");
 
     char *removed = NULL;
@@ -374,6 +382,7 @@ esp_err_t mqtt_svc_unsubscribe(const char *filter)
 }
 
 esp_err_t mqtt_svc_disconnect(void) {
+    ESP_RETURN_ON_FALSE(s_client != NULL, ESP_ERR_INVALID_STATE, TAG, "not initialized");
     ESP_RETURN_ON_ERROR(esp_mqtt_client_disconnect(s_client), TAG, "error while disconnecting");
     return ESP_OK;
 }

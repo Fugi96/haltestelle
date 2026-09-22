@@ -72,19 +72,18 @@ esp_err_t ssd1306_init(i2c_master_dev_handle_t i2c, ssd1306_handle_t *h) {
 }
 
 
-esp_err_t ssd1306_flush(ssd1306_handle_t h, const uint8_t *buf, int width, int height) {
-    if (h == NULL || buf == NULL) return ESP_ERR_INVALID_ARG;
+esp_err_t ssd1306_flush(ssd1306_handle_t h, const uint16_t *pixels, int width, int height) {
+    if (h == NULL || pixels == NULL) return ESP_ERR_INVALID_ARG;
     if (width != SSD1306_WIDTH || height != SSD1306_HEIGHT) return ESP_ERR_INVALID_SIZE;
 
-    // Rows of horizontal bytes become pages of vertical bytes, bit 0 on top.
-    int stride = (width + 7) / 8;
+    // Rows of colors become pages of vertical bytes, bit 0 on top; any color but black is on.
     memset(h->fb, 0x00, SSD1306_FB_SIZE);
     for (int y = 0; y < SSD1306_HEIGHT; y++) {
-        const uint8_t *row = &buf[y * stride];
+        const uint16_t *row = &pixels[y * SSD1306_WIDTH];
         uint8_t *page = &h->fb[(y / SSD1306_PAGE_HEIGHT) * SSD1306_WIDTH];
         uint8_t bit = 0x01 << (y % SSD1306_PAGE_HEIGHT);
         for (int x = 0; x < SSD1306_WIDTH; x++)
-            if (row[x / 8] & (0x80 >> (x % 8)))
+            if (row[x] != 0)
                 page[x] |= bit;
     }
 

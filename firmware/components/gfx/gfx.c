@@ -9,23 +9,17 @@
 #define FALLBACK_GLYPH '?'
 
 void gfx_clear(gfx_canvas_t *c) {
-    memset(c->buf, 0x00, GFX_BUF_SIZE(c->width, c->height));
+    memset(c->buf, 0x00, GFX_BUF_LEN(c->width, c->height) * sizeof(gfx_color_t));
 }
 
-void gfx_set_pixel(gfx_canvas_t *c, int x, int y, bool on) {
+void gfx_set_pixel(gfx_canvas_t *c, int x, int y, gfx_color_t color) {
     if (x < 0 || x >= c->width || y < 0 || y >= c->height)
         return;
 
-    uint8_t *byte = &c->buf[y * GFX_STRIDE(c->width) + x / 8];
-    uint8_t bit = 0x80 >> (x % 8);
-
-    if (on)
-        *byte |= bit;
-    else
-        *byte &= ~bit;
+    c->buf[y * c->width + x] = color;
 }
 
-void gfx_draw_line(gfx_canvas_t *c, int x0, int y0, int x1, int y1, bool on) {
+void gfx_draw_line(gfx_canvas_t *c, int x0, int y0, int x1, int y1, gfx_color_t color) {
     int dx = abs(x1 - x0);
     int dy = -abs(y1 - y0);
     int sx = x0 < x1 ? 1 : -1;
@@ -33,7 +27,7 @@ void gfx_draw_line(gfx_canvas_t *c, int x0, int y0, int x1, int y1, bool on) {
     int err = dx + dy;
 
     for (;;) {
-        gfx_set_pixel(c, x0, y0, on);
+        gfx_set_pixel(c, x0, y0, color);
         if (x0 == x1 && y0 == y1) break;
         int e2 = 2 * err;
         if (e2 >= dy) { err += dy; x0 += sx; }
@@ -41,14 +35,14 @@ void gfx_draw_line(gfx_canvas_t *c, int x0, int y0, int x1, int y1, bool on) {
     }
 }
 
-void gfx_draw_rect(gfx_canvas_t *c, int x0, int y0, int x1, int y1, bool on) {
-    gfx_draw_line(c, x0, y0, x1, y0, on);
-    gfx_draw_line(c, x1, y0, x1, y1, on);
-    gfx_draw_line(c, x1, y1, x0, y1, on);
-    gfx_draw_line(c, x0, y1, x0, y0, on);
+void gfx_draw_rect(gfx_canvas_t *c, int x0, int y0, int x1, int y1, gfx_color_t color) {
+    gfx_draw_line(c, x0, y0, x1, y0, color);
+    gfx_draw_line(c, x1, y0, x1, y1, color);
+    gfx_draw_line(c, x1, y1, x0, y1, color);
+    gfx_draw_line(c, x0, y1, x0, y0, color);
 }
 
-void gfx_draw_arc(gfx_canvas_t *c, int cx, int cy, int radius, float start_deg, float end_deg, int thickness, bool on) {
+void gfx_draw_arc(gfx_canvas_t *c, int cx, int cy, int radius, float start_deg, float end_deg, int thickness, gfx_color_t color) {
     if (thickness < 1) thickness = 1;
 
     int outer = radius + thickness - 1;
@@ -65,7 +59,7 @@ void gfx_draw_arc(gfx_canvas_t *c, int cx, int cy, int radius, float start_deg, 
         for (int r = radius; r < radius + thickness; r++) {
             int x = cx + (int)lroundf(r * co);
             int y = cy - (int)lroundf(r * s);
-            gfx_set_pixel(c, x, y, on);
+            gfx_set_pixel(c, x, y, color);
         }
     }
 }
@@ -116,31 +110,31 @@ int gfx_text_width(const char *str) {
     return width;
 }
 
-int gfx_draw_string(gfx_canvas_t *c, const char *str, int x, int y) {
+int gfx_draw_string(gfx_canvas_t *c, const char *str, int x, int y, gfx_color_t color) {
     while (*str) {
         const font_glyph_t *g = glyph_for(utf8_next(&str));
         if (g == NULL) continue;
         for (int col = 0; col < g->width; col++)
             for (int row = 0; row < FONT_HEIGHT; row++)
                 if (g->cols[col] & (1u << row))
-                    gfx_set_pixel(c, x + col, y + row, true);
+                    gfx_set_pixel(c, x + col, y + row, color);
         x += g->width;
     }
     return x;
 }
 
-void gfx_draw_string_centered(gfx_canvas_t *c, const char *str, int y) {
-    gfx_draw_string(c, str, (c->width - gfx_text_width(str)) / 2, y);
+void gfx_draw_string_centered(gfx_canvas_t *c, const char *str, int y, gfx_color_t color) {
+    gfx_draw_string(c, str, (c->width - gfx_text_width(str)) / 2, y, color);
 }
 
-void gfx_draw_number(gfx_canvas_t *c, int number, int x, int y) {
+void gfx_draw_number(gfx_canvas_t *c, int number, int x, int y, gfx_color_t color) {
     char digits[12];
     snprintf(digits, sizeof(digits), "%d", number);
-    gfx_draw_string(c, digits, x, y);
+    gfx_draw_string(c, digits, x, y, color);
 }
 
-void gfx_draw_number_centered(gfx_canvas_t *c, int number, int y) {
+void gfx_draw_number_centered(gfx_canvas_t *c, int number, int y, gfx_color_t color) {
     char digits[12];
     snprintf(digits, sizeof(digits), "%d", number);
-    gfx_draw_string_centered(c, digits, y);
+    gfx_draw_string_centered(c, digits, y, color);
 }

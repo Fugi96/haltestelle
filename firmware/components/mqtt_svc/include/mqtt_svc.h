@@ -10,6 +10,7 @@
 // for documentation: client_id may be null (broker assigns one) or a null-terminated c-string
 // for documentation: username/password may both be null (anonymous broker) or valid null-terminated c-strings
 // for documentation: lifecycle: init -> (subscribe)* -> connect -> (publish | subscribe | unsubscribe | flush)* -> disconnect -> deinit
+// for documentation: before a successful init, functions return ESP_ERR_INVALID_STATE (publish returns -1)
 // for documentation: requires an established IP connection (wlink connected + got IP) before connect is called
 // for documentation: nvs and the default event loop need to be initialized
 // for documentation: all callbacks run in the esp-mqtt task and must not block; publish is fine, flush is not
