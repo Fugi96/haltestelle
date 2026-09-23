@@ -12,14 +12,15 @@ from .models import DepartureBoard
 
 INTERVAL = 30
 LIMIT = 40
+HORIZON = 45 * 60
 
 
 def build_board(
     station_id: str, classes: list[int] | None, lines: list[dict], limit: int = LIMIT
 ) -> DepartureBoard:
-    """Fetch departures restricted to the chosen lines."""
+    """Fetch departures within HORIZON, restricted to the chosen lines."""
     board = DepartureBoard.model_validate(
-        efa.fetch_departures(station_id, limit, classes)
+        efa.fetch_departures(station_id, limit, classes, within=HORIZON)
     )
     known = {(p["line"], p["dest"]): p["cls"] for p in db.station_lines(station_id)}
     # Choices whose class is filtered out are kept but not applied; none applied means all.
