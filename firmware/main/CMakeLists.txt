@@ -4,7 +4,8 @@ idf_component_register(
                        PRIV_REQUIRES 
                             esp_driver_i2c 
                             esp_event
-                            ssd1306 
+                            ssd1306
+                            gfx
                             wlink
                             mqtt_svc
                             nvs_flash

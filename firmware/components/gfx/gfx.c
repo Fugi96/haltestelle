@@ -110,17 +110,47 @@ int gfx_text_width(const char *str) {
     return width;
 }
 
+static int draw_glyph(gfx_canvas_t *c, const font_glyph_t *g, int x, int y, gfx_color_t color) {
+    for (int col = 0; col < g->width; col++)
+        for (int row = 0; row < FONT_HEIGHT; row++)
+            if (g->cols[col] & (1u << row))
+                gfx_set_pixel(c, x + col, y + row, color);
+    return x + g->width;
+}
+
 int gfx_draw_string(gfx_canvas_t *c, const char *str, int x, int y, gfx_color_t color) {
     while (*str) {
         const font_glyph_t *g = glyph_for(utf8_next(&str));
-        if (g == NULL) continue;
-        for (int col = 0; col < g->width; col++)
-            for (int row = 0; row < FONT_HEIGHT; row++)
-                if (g->cols[col] & (1u << row))
-                    gfx_set_pixel(c, x + col, y + row, color);
-        x += g->width;
+        if (g)
+            x = draw_glyph(c, g, x, y, color);
     }
     return x;
+}
+
+int gfx_draw_string_ellipsized(gfx_canvas_t *c, const char *str, int x, int y, int max_width, gfx_color_t color) {
+    if (gfx_text_width(str) <= max_width)
+        return gfx_draw_string(c, str, x, y, color);
+
+    const font_glyph_t *dot = glyph_lookup('.');
+    int budget = max_width - (dot ? 3 * dot->width : 0);
+    int at = x;
+
+    while (*str) {
+        const char *next = str;
+        const font_glyph_t *g = glyph_for(utf8_next(&next));
+        if (g == NULL) {
+            str = next;
+            continue;
+        }
+        if (at - x + g->width > budget)
+            break;
+        at = draw_glyph(c, g, at, y, color);
+        str = next;
+    }
+
+    for (int i = 0; i < 3 && dot; i++)
+        at = draw_glyph(c, dot, at, y, color);
+    return at;
 }
 
 void gfx_draw_string_centered(gfx_canvas_t *c, const char *str, int y, gfx_color_t color) {

@@ -33,6 +33,8 @@ void gfx_draw_arc(gfx_canvas_t *c, int cx, int cy, int radius, float start_deg, 
 // Characters missing from the font are drawn as '?'.
 // Returns the x just past the drawn text.
 int gfx_draw_string(gfx_canvas_t *c, const char *str, int x, int y, gfx_color_t color);
+// Cuts the text at a glyph boundary and appends "..." when it is wider than max_width.
+int gfx_draw_string_ellipsized(gfx_canvas_t *c, const char *str, int x, int y, int max_width, gfx_color_t color);
 void gfx_draw_string_centered(gfx_canvas_t *c, const char *str, int y, gfx_color_t color);
 void gfx_draw_number(gfx_canvas_t *c, int number, int x, int y, gfx_color_t color);
 void gfx_draw_number_centered(gfx_canvas_t *c, int number, int y, gfx_color_t color);
