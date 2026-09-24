@@ -5,9 +5,9 @@ Rhein-Ruhr region (including Düsseldorf) and needs no registration. The base
 URL is overridable via EFA_BASE_URL so you can swap in a registered production
 endpoint (or a different Verkehrsverbund) later without code changes.
 
-Two calls live here: the "stopfinder" (name -> candidate stops) and the
-departure monitor (stop id -> upcoming departures), which reuses the `id`
-values the stopfinder returns.
+Three calls live here: the "stopfinder" (name -> candidate stops), the
+departure monitor (stop id -> upcoming departures) and serving lines (stop
+id -> the lines running there), all keyed by the stopfinder's `id` values.
 
 Both are synchronous, like the rest of the app. Async callers should use
 `run_in_threadpool`.
@@ -15,6 +15,7 @@ Both are synchronous, like the rest of the app. Async callers should use
 
 import datetime as dt
 import html
+import json
 import os
 import re
 import time
@@ -81,6 +82,9 @@ _MIN_ALERT_LEN = 40
 # Including any of these also returns class 0, Ersatzverkehr.
 _RAIL_CLASSES = {13, 14, 15, 16}
 
+# Long-distance trains: serving lines lists them once per train number.
+_LONG_DISTANCE = {14, 15, 16}
+
 
 def class_included(cls: int | None, classes: list[int] | None) -> bool:
     """Whether departures of class `cls` come back under this class filter."""
@@ -128,6 +132,26 @@ def _locality_of(event: dict) -> tuple[str, str]:
     return locality, match.group(1) if match else ""
 
 
+def _line_name(transport: dict) -> str:
+    """Line as shown. The Wuppertal Schwebebahn has no `number`, only "60" in disassembledName."""
+    return (
+        transport.get("number")
+        or transport.get("disassembledName")
+        or transport.get("name")
+        or ""
+    )
+
+
+def line_id(full_id: str) -> str:
+    """An EFA line id without its timetable period, which changes every year.
+
+    "rbg:70076: :R:j26" -> "rbg:70076: :R". The departure monitor's `line=`
+    accepts this form.
+    """
+    parts = full_id.split(":")
+    return ":".join(parts[:4]) if len(parts) == 5 else full_id
+
+
 def _strip_html(text: str) -> str:
     """Flatten EFA's HTML disruption text into one plain-text line.
 
@@ -145,13 +169,14 @@ def fetch_departures(
     limit: int = 8,
     classes: list[int] | None = None,
     within: int | None = None,
+    lines: list[str] | None = None,
 ) -> dict:
     """Fetch upcoming departures for a stop, trimmed to the useful fields.
 
     `station_id` is an EFA global id (DHID) as returned by `search_locations`.
-    `classes` restricts to those EFA product classes; None means all. `limit`
-    counts after that filter. `within` drops departures more than that many
-    seconds away; EFA itself has no time filter.
+    `classes` restricts to those EFA product classes and `lines` to those line
+    ids; None means all. `limit` counts after both filters. `within` drops
+    departures more than that many seconds away; EFA itself has no time filter.
 
     The raw response runs ~30 kB for eight departures, mostly nested location
     records and HTML notices repeated per event; this reduces it to roughly
@@ -177,6 +202,8 @@ def fetch_departures(
     if classes is not None:
         # Must repeat the parameter; "4,5" matches nothing.
         params["includedMeans"] = [str(c) for c in classes] # type: ignore
+    if lines:
+        params["line"] = lines # type: ignore
     resp = httpx.get(f"{EFA_BASE_URL}/XML_DM_REQUEST", params=params, timeout=_TIMEOUT)
     resp.raise_for_status()
     events = resp.json().get("stopEvents") or []
@@ -199,7 +226,7 @@ def fetch_departures(
 
         departures.append(
             {
-                "line": transport["number"],
+                "line": _line_name(transport),
                 "cls": transport.get("product", {}).get("class"),
                 "dest": _clean_name(transport["destination"]["name"], locality, abbrev),
                 "ts": _epoch(estimated or planned),
@@ -232,3 +259,53 @@ def fetch_departures(
         "departures": departures,
         "alerts": list(alerts.values()),
     }
+
+
+# --- serving lines -----------------------------------------------------------
+
+
+def fetch_lines(station_id: str, date: dt.date, locality: str = "") -> list[dict]:
+    """Lines running at a stop on `date`, via XML_SERVINGLINES_REQUEST.
+
+    One dict per record: id (see `line_id`), name, direction, cls, dest and
+    dest_id. The ids are the departure monitor's. Long-distance trains are left
+    out. `locality` is the stop's town, stripped from destinations as on the
+    board. Raises httpx.HTTPError on network or HTTP failures.
+    """
+    params = {
+        "outputFormat": "rapidJSON",
+        "mode": "odv",
+        "type_sl": "stopID",
+        "name_sl": station_id,
+        "lineReqType": "1",
+        "lsShowTrainsExplicit": "1",
+        # Undocumented. Without it lineReqType=1 has no RE/RB, whatever lsShowTrainsExplicit says.
+        "withoutTrains": "0",
+        "itdDate": date.strftime("%Y%m%d"),
+    }
+    resp = httpx.get(
+        f"{EFA_BASE_URL}/XML_SERVINGLINES_REQUEST", params=params, timeout=_TIMEOUT
+    )
+    resp.raise_for_status()
+    # Serving-lines responses have carried stray Latin-1 bytes.
+    data = json.loads(resp.content.decode("utf-8", errors="replace"))
+
+    lines = []
+    for record in data.get("lines") or []:
+        cls = (record.get("product") or {}).get("class")
+        name = _line_name(record)
+        parts = record["id"].split(":")
+        if cls in _LONG_DISTANCE or not name.strip() or len(parts) < 4:
+            continue
+        destination = record.get("destination") or {}
+        lines.append(
+            {
+                "id": line_id(record["id"]),
+                "name": name,
+                "direction": parts[3],
+                "cls": cls,
+                "dest": _clean_name(destination.get("name") or "", locality) or None,
+                "dest_id": destination.get("id"),
+            }
+        )
+    return lines

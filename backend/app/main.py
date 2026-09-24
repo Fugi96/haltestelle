@@ -4,7 +4,7 @@ Lets a user pick which station to poll departures for. Discovery is organic:
 the user searches, the EFA stopfinder returns candidate stops, the user picks
 one, and that choice is cached locally so it appears as autocomplete next
 time. A background poller (`poller.py`) fetches departures for the selected
-station and vehicle classes.
+station, vehicle classes and lines; `linelist.py` keeps its lines current.
 
 Endpoints:
     GET  /                     -> the single-page frontend
@@ -13,11 +13,11 @@ Endpoints:
     GET  /api/stations/lookup  -> online lookup via EFA (adds nothing itself)
     POST /api/station          -> select a station (sets current + caches it)
     GET  /api/station          -> the currently selected station
-    GET  /api/station/lines    -> line + destination pairs known at that station
+    GET  /api/station/lines    -> lines known at that station
     GET  /api/classes          -> the vehicle classes departures are filtered to
     PUT  /api/classes          -> set those classes (null for all)
-    GET  /api/lines            -> the line + destination pairs to include
-    PUT  /api/lines            -> set those pairs (empty for all)
+    GET  /api/lines            -> keys of the lines to include
+    PUT  /api/lines            -> set those keys (empty for all)
     GET  /api/power            -> whether output is on
     PUT  /api/power            -> switch output on or off
     GET  /api/settings         -> output settings (brightness)
@@ -39,7 +39,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import db, efa, mqtt, poller, state
+from . import db, efa, linelist, mqtt, poller, state
 from .models import (
     ClassFilter,
     DepartureBoard,
@@ -58,16 +58,17 @@ FRONTEND_DIR = Path(
     os.environ.get("FRONTEND_DIR", Path(__file__).resolve().parents[2] / "frontend")
 )
 
-# Departures scanned to learn a station's lines. Lines absent from them stay unknown.
-LINE_SEED_LIMIT = 300
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db.init_db()
     _publish_power(_stored(Power))
     _publish_settings(_stored(OutputSettings))
-    tasks = [asyncio.create_task(mqtt.publisher.run()), asyncio.create_task(poller.run())]
+    tasks = [
+        asyncio.create_task(mqtt.publisher.run()),
+        asyncio.create_task(linelist.run()),
+        asyncio.create_task(poller.run()),
+    ]
     yield
     for task in reversed(tasks):
         task.cancel()
@@ -130,23 +131,17 @@ def select_station(selection: StationSelection):
     This is the single "command" today. If more actions arrive later (clear
     display, change interval, …), a small command dispatcher would slot in here.
     """
-    # Learned once per station. Fetched before saving, so a failure changes nothing.
-    new_lines = []
-    if not db.station_lines(selection.id):
+    # Fetched before saving, so a failure changes nothing.
+    fetched = None
+    if linelist.is_stale(selection.id):
         try:
-            board = efa.fetch_departures(selection.id, limit=LINE_SEED_LIMIT)
+            fetched = linelist.fetch(selection.id, selection.name)
         except httpx.HTTPError as exc:
             raise HTTPException(status_code=502, detail=f"Line lookup failed: {exc}")
-        new_lines = [
-            {"line": d["line"], "dest": d["dest"], "cls": d["cls"]}
-            for d in board["departures"]
-        ]
 
     db.upsert_station(selection.model_dump())
-    db.add_lines(selection.id, new_lines)
-    # Chosen lines belong to one station.
-    if (state.get_station() or {}).get("id") != selection.id:
-        state.set_lines([])
+    if fetched is not None:
+        linelist.store(selection.id, fetched)
     state.set_station(selection.id, selection.name)
     return StationState(**(state.get_station() or {}))
 
@@ -160,7 +155,7 @@ def read_station():
 
 @app.get("/api/station/lines", response_model=list[KnownLine])
 def read_station_lines():
-    """Line + destination pairs known at the selected station."""
+    """Lines known at the selected station, one per line and direction."""
     current = state.get_station()
     if not current:
         raise HTTPException(status_code=409, detail="No station selected.")
@@ -182,26 +177,23 @@ def select_classes(selection: ClassFilter):
 
 @app.get("/api/lines", response_model=LineSelection)
 def read_lines():
-    """Return the line + destination pairs departures are restricted to."""
-    return LineSelection.model_validate({"lines": state.get_lines()})
+    """Return the keys of the lines departures are restricted to."""
+    current = state.get_station()
+    return LineSelection(lines=state.get_lines(current["id"]) if current else [])
 
 
 @app.put("/api/lines", response_model=LineSelection)
 def select_lines(selection: LineSelection):
-    """Set the line + destination pairs to include. Empty clears the filter.
+    """Set the keys of the lines to include. Empty clears the filter.
 
-    Pairs not known at the selected station are dropped.
+    Keys not known at the selected station are dropped.
     """
     current = state.get_station()
-    known = (
-        {(p["line"], p["dest"]) for p in db.station_lines(current["id"])}
-        if current
-        else set()
-    )
-    state.set_lines(
-        [pair.model_dump() for pair in selection.lines if (pair.line, pair.dest) in known]
-    )
-    return LineSelection.model_validate({"lines": state.get_lines()})
+    if not current:
+        raise HTTPException(status_code=409, detail="No station selected.")
+    known = {line["key"] for line in db.station_lines(current["id"])}
+    state.set_lines(current["id"], [key for key in selection.lines if key in known])
+    return LineSelection(lines=state.get_lines(current["id"]))
 
 
 def _stored(model):
@@ -266,7 +258,7 @@ def read_departures(limit: int = Query(poller.LIMIT, ge=1, le=200)):
         raise HTTPException(status_code=409, detail="No station selected.")
     try:
         return poller.build_board(
-            current["id"], state.get_classes(), state.get_lines(), limit
+            current["id"], state.get_classes(), state.get_lines(current["id"]), limit
         )
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"Departure lookup failed: {exc}")

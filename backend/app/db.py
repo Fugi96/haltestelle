@@ -1,4 +1,4 @@
-"""Local SQLite cache of stations the user has actually selected.
+"""Local SQLite store: stations the user has selected, their lines, settings.
 
 We deliberately do NOT preload a full station registry. Instead the cache is
 built organically: whenever the user picks a station (resolved via the EFA
@@ -6,12 +6,16 @@ stopfinder), it's stored here, and from then on it shows up as a fast, offline
 autocomplete suggestion. Over time this becomes exactly the set of stations
 this particular household cares about.
 
+A station's lines are one row per line and direction (`line_groups`), each
+with every EFA line id it runs under (`line_ids`).
+
 A new connection is opened per call. FastAPI runs sync endpoints in a thread
 pool, and SQLite connections aren't shareable across threads, so per-call
 connections keep things simple and safe. A single write lock serialises the
 (rare) writes.
 """
 
+import datetime as dt
 import json
 import os
 import sqlite3
@@ -44,19 +48,43 @@ def init_db() -> None:
                 name       TEXT NOT NULL,      -- full name, e.g. "Düsseldorf, Düsseldorf Hbf"
                 short_name TEXT,               -- disassembledName
                 use_count  INTEGER NOT NULL DEFAULT 0,
-                last_used  TEXT
+                last_used  TEXT,
+                lines_generated_at TEXT        -- last fetch of its lines, UTC
             )
             """
         )
+        # Added after the table existed.
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(stations)")}
+        if "lines_generated_at" not in columns:
+            conn.execute("ALTER TABLE stations ADD COLUMN lines_generated_at TEXT")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_stations_name ON stations(name)")
+        # Superseded by line_groups and line_ids.
+        conn.execute("DROP TABLE IF EXISTS lines")
         conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS lines (
+            CREATE TABLE IF NOT EXISTS line_groups (
                 station_id TEXT NOT NULL,      -- stations.id
-                line       TEXT NOT NULL,      -- e.g. "U79"
-                dest       TEXT NOT NULL,      -- locality prefix stripped
+                name       TEXT NOT NULL,      -- as shown, e.g. "RE1 (RRX)"
+                direction  TEXT NOT NULL,      -- H or R, from the line id
                 cls        INTEGER,            -- EFA product class
-                PRIMARY KEY (station_id, line, dest)
+                dest       TEXT,               -- label, locality prefix stripped
+                dest_id    TEXT,               -- EFA stop id of dest
+                last_seen  TEXT NOT NULL,      -- UTC
+                PRIMARY KEY (station_id, name, direction)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS line_ids (
+                station_id TEXT NOT NULL,      -- stations.id
+                id         TEXT NOT NULL,      -- EFA line id, period dropped
+                name       TEXT NOT NULL,      -- line_groups.name
+                direction  TEXT NOT NULL,      -- line_groups.direction
+                dest       TEXT,
+                dest_id    TEXT,
+                last_seen  TEXT NOT NULL,      -- UTC
+                PRIMARY KEY (station_id, id)
             )
             """
         )
@@ -66,14 +94,6 @@ def init_db() -> None:
                         value   TEXT              -- value of the setting
                      )
                      """)
-        conn.execute("""
-                     INSERT OR IGNORE INTO settings (setting, value)
-                     VALUES (:setting, :value)
-                     """,
-                     {
-                         "setting": "selected",
-                         "value": None
-                     })
 
 
 def upsert_station(station: dict) -> None:
@@ -137,22 +157,111 @@ def write_setting(name: str, value) -> None:
         )
 
 
+def line_key(name: str, direction: str) -> str:
+    """Reference to one line and direction at a station."""
+    return f"{name}|{direction}"
+
+
 def station_lines(station_id: str) -> list[dict]:
-    """Line + destination pairs known at a station."""
+    """Lines known at a station: key, name, direction, cls, dest, dest_id, ids."""
     with _connect() as conn:
-        rows = conn.execute(
-            "SELECT line, dest, cls FROM lines WHERE station_id = ?", (station_id,)
+        groups = conn.execute(
+            """
+            SELECT name, direction, cls, dest, dest_id FROM line_groups
+            WHERE station_id = ?
+            """,
+            (station_id,),
         ).fetchall()
-    return [dict(r) for r in rows]
+        ids = conn.execute(
+            "SELECT id, name, direction FROM line_ids WHERE station_id = ? ORDER BY id",
+            (station_id,),
+        ).fetchall()
+    by_key: dict[str, list[str]] = {}
+    for row in ids:
+        by_key.setdefault(line_key(row["name"], row["direction"]), []).append(row["id"])
+    lines = []
+    for row in groups:
+        key = line_key(row["name"], row["direction"])
+        lines.append({"key": key, **dict(row), "ids": by_key.get(key, [])})
+    return lines
 
 
-def add_lines(station_id: str, lines: list[dict]) -> None:
-    """Remember line + destination pairs seen at a station. Known pairs are kept."""
+def store_lines(station_id: str, groups: list[dict], ids: list[dict]) -> None:
+    """Merge lines into a station's list and mark them seen now."""
     with _write_lock, _connect() as conn:
         conn.executemany(
             """
-            INSERT OR IGNORE INTO lines (station_id, line, dest, cls)
-            VALUES (:station_id, :line, :dest, :cls)
+            INSERT INTO line_groups
+                (station_id, name, direction, cls, dest, dest_id, last_seen)
+            VALUES (:station_id, :name, :direction, :cls, :dest, :dest_id, datetime('now'))
+            ON CONFLICT(station_id, name, direction) DO UPDATE SET
+                cls       = excluded.cls,
+                dest      = excluded.dest,
+                dest_id   = excluded.dest_id,
+                last_seen = excluded.last_seen
             """,
-            [{"station_id": station_id, **pair} for pair in lines],
+            [{"station_id": station_id, **group} for group in groups],
+        )
+        conn.executemany(
+            """
+            INSERT INTO line_ids
+                (station_id, id, name, direction, dest, dest_id, last_seen)
+            VALUES (:station_id, :id, :name, :direction, :dest, :dest_id, datetime('now'))
+            ON CONFLICT(station_id, id) DO UPDATE SET
+                name      = excluded.name,
+                direction = excluded.direction,
+                dest      = excluded.dest,
+                dest_id   = excluded.dest_id,
+                last_seen = excluded.last_seen
+            """,
+            [{"station_id": station_id, **line} for line in ids],
+        )
+
+
+def evict_lines(station_id: str, days: int, keep: list[str]) -> None:
+    """Drop lines and ids unseen for `days`, except lines whose key is in `keep`."""
+    stale = "station_id = ? AND last_seen < datetime('now', ?)"
+    args = (station_id, f"-{days} days")
+    with _write_lock, _connect() as conn:
+        groups = conn.execute(
+            f"SELECT name, direction FROM line_groups WHERE {stale}", args
+        ).fetchall()
+        conn.executemany(
+            "DELETE FROM line_groups WHERE station_id = ? AND name = ? AND direction = ?",
+            [
+                (station_id, row["name"], row["direction"])
+                for row in groups
+                if line_key(row["name"], row["direction"]) not in keep
+            ],
+        )
+        ids = conn.execute(
+            f"SELECT id, name, direction FROM line_ids WHERE {stale}", args
+        ).fetchall()
+        conn.executemany(
+            "DELETE FROM line_ids WHERE station_id = ? AND id = ?",
+            [
+                (station_id, row["id"])
+                for row in ids
+                if line_key(row["name"], row["direction"]) not in keep
+            ],
+        )
+
+
+def lines_generated_at(station_id: str) -> dt.datetime | None:
+    """When a station's lines were last fetched, or None if never."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT lines_generated_at FROM stations WHERE id = ?", (station_id,)
+        ).fetchone()
+    if not row or not row["lines_generated_at"]:
+        return None
+    return dt.datetime.fromisoformat(row["lines_generated_at"]).replace(tzinfo=dt.timezone.utc)
+
+
+def mark_lines_generated(station_id: str) -> None:
+    """Record that a station's lines were fetched now."""
+    with _write_lock, _connect() as conn:
+        conn.execute(
+            "UPDATE stations SET lines_generated_at = datetime('now') WHERE id = ?",
+            (station_id,),
         )

@@ -46,23 +46,22 @@ class OutputSettings(BaseModel):
     brightness: int = Field(100, ge=0, le=100, description="Brightness in percent.")
 
 
-class LineRef(BaseModel):
-    """A line towards one destination."""
+class KnownLine(BaseModel):
+    """A line in one direction at a station."""
 
-    line: str = Field(min_length=1, description='Line number as shown, e.g. "U79".')
-    dest: str = Field(min_length=1, description="Destination, locality prefix stripped.")
-
-
-class KnownLine(LineRef):
-    """A line + destination pair seen at a station."""
-
+    key: str = Field(description="Reference used to choose the line.")
+    name: str = Field(description='Line as shown, e.g. "RE1 (RRX)".')
+    direction: str = Field(description="H or R, from the EFA line id.")
     cls: int | None = Field(None, description="EFA product class, e.g. 2 for U-Bahn.")
+    dest: str | None = Field(None, description="Destination, locality prefix stripped.")
+    dest_id: str | None = Field(None, description="EFA stop id of the destination.")
+    ids: list[str] = Field([], description="EFA line ids it runs under, period dropped.")
 
 
 class LineSelection(BaseModel):
-    """Line and destination pairs departures are restricted to."""
+    """Lines departures are restricted to."""
 
-    lines: list[LineRef] = Field([], description="Pairs to include. Empty for all.")
+    lines: list[str] = Field([], description="Keys of the lines to include. Empty for all.")
 
 
 class Departure(BaseModel):

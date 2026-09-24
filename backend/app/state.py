@@ -1,55 +1,46 @@
-"""In-memory store for the station currently selected for polling.
+"""Selected station, vehicle classes and chosen lines, persisted in SQLite.
 
 Holds the *resolved* station (a stable EFA id plus a display name), not the
-raw text the user typed. The future polling loop reads this each cycle. Kept
-in its own module so persistence (surviving restarts) can be added here later
-— e.g. reading/writing the last selection to the SQLite DB — without touching
-the API layer.
+raw text the user typed. Chosen lines are kept per station, so switching back
+restores them.
 """
 
 from threading import Lock
 
-_lock = Lock()
-_current: dict | None = None
-_classes: list[int] | None = None
-_lines: list[dict] = []
+from . import db
+
+# Chosen lines of all stations share one setting, so updates must not interleave.
+_lines_lock = Lock()
 
 
 def get_station() -> dict | None:
     """Return the selected station as {"id", "name"}, or None if unset."""
-    with _lock:
-        return dict(_current) if _current else None
+    return db.read_setting("station")
 
 
 def set_station(id: str, name: str) -> None:
     """Set the station to poll. Called when the user picks a candidate."""
-    global _current
-    with _lock:
-        _current = {"id": id, "name": name}
+    db.write_setting("station", {"id": id, "name": name})
 
 
 def get_classes() -> list[int] | None:
     """Return the EFA classes to include, or None for all."""
-    with _lock:
-        return list(_classes) if _classes is not None else None
+    return db.read_setting("classes")
 
 
 def set_classes(classes: list[int] | None) -> None:
     """Set the EFA classes to include. None or empty clears the filter."""
-    global _classes
-    with _lock:
-        _classes = sorted(set(classes)) if classes else None
+    db.write_setting("classes", sorted(set(classes)) if classes else None)
 
 
-def get_lines() -> list[dict]:
-    """Return the chosen {"line", "dest"} pairs. Empty means all."""
-    with _lock:
-        return [dict(pair) for pair in _lines]
+def get_lines(station_id: str) -> list[str]:
+    """Return the keys of the lines chosen at a station. Empty means all."""
+    return (db.read_setting("lines") or {}).get(station_id, [])
 
 
-def set_lines(lines: list[dict]) -> None:
-    """Set the {"line", "dest"} pairs to include. Empty clears the filter."""
-    global _lines
-    with _lock:
-        unique = dict.fromkeys((pair["line"], pair["dest"]) for pair in lines)
-        _lines = [{"line": line, "dest": dest} for line, dest in unique]
+def set_lines(station_id: str, keys: list[str]) -> None:
+    """Set the keys of the lines to include at a station. Empty clears the filter."""
+    with _lines_lock:
+        chosen = db.read_setting("lines") or {}
+        chosen[station_id] = list(dict.fromkeys(keys))
+        db.write_setting("lines", chosen)

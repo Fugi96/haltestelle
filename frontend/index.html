@@ -326,7 +326,7 @@
         showCurrent(await res.json());
         status.textContent = "";
         closeSearch();
-        // The backend clears chosen lines when the station changes.
+        // Chosen lines are kept per station.
         await loadChosen().catch(() => {});
         loadLines();
       } catch (e) {
@@ -380,11 +380,11 @@
     };
 
     // `classes` are EFA product.class values. Including 13-16 also returns
-    // class 0 Ersatzverkehr, so it needs no button of its own.
+    // class 0 Ersatzverkehr, so it needs no button of its own. 11 is the Wuppertal Schwebebahn.
     const FILTERS = [
       { key: "sbahn", label: "S-Bahn", classes: [1] },
       { key: "ubahn", label: "U-Bahn", classes: [2] },
-      { key: "tram", label: "Tram", classes: [4] },
+      { key: "tram", label: "Tram", classes: [4, 11] },
       { key: "bus", label: "Bus", classes: [5, 7] },
       { key: "train", label: "Zug", classes: [13, 14, 15, 16] },
     ];
@@ -471,27 +471,22 @@
     FILTERS.forEach((f) => f.classes.forEach((c) => { ICON_BY_CLASS[c] = f.key; }));
     // Only the newest request may render, since responses can arrive out of order.
     let linesSeq = 0;
-    // Line + destination pairs known at the station, with their class.
+    // Lines known at the station, one per line and direction, with their class.
     let known = null;
-    // Keys of the chosen pairs. Kept while their class is filtered out.
+    // Keys of the chosen lines. Kept while their class is filtered out.
     const chosen = new Set();
-
-    const pairKey = (p) => JSON.stringify([p.line, p.dest]);
 
     async function loadChosen() {
       const res = await fetch("/api/lines");
       if (!res.ok) throw new Error(res.statusText);
       chosen.clear();
-      (await res.json()).lines.forEach((p) => chosen.add(pairKey(p)));
+      (await res.json()).lines.forEach((k) => chosen.add(k));
     }
 
     // Chained so rapid taps reach the backend in order.
     let lineSync = Promise.resolve();
     function saveChosen() {
-      const lines = [...chosen].map((k) => {
-        const [line, dest] = JSON.parse(k);
-        return { line, dest };
-      });
+      const lines = [...chosen];
       lineSync = lineSync.then(async () => {
         try {
           const res = await fetch("/api/lines", {
@@ -508,17 +503,17 @@
       });
     }
 
-    /** Known pairs whose class passes the class filter. Mirrors efa.class_included. */
-    function visiblePairs() {
+    /** Known lines whose class passes the class filter. Mirrors efa.class_included. */
+    function visibleLines() {
       const all = enabled.size === FILTERS.length;
-      return known.filter((p) => all || enabled.has(ICON_BY_CLASS[p.cls]));
+      return known.filter((l) => all || enabled.has(ICON_BY_CLASS[l.cls]));
     }
 
-    // Only choices among visible pairs apply, and none applying means all.
-    // Choosing every visible pair clears just those, so hidden choices survive.
+    // Only choices among visible lines apply, and none applying means all.
+    // Choosing every visible line clears just those, so hidden choices survive.
     function toggleLine(k) {
       chosen.has(k) ? chosen.delete(k) : chosen.add(k);
-      const keys = visiblePairs().map(pairKey);
+      const keys = visibleLines().map((l) => l.key);
       if (keys.every((key) => chosen.has(key))) keys.forEach((key) => chosen.delete(key));
       renderLines();
       saveChosen();
@@ -526,21 +521,22 @@
     }
 
     const SETTLE_MS = 5000;
-    // Display order as pair keys. Changes only when sorted, so taps never move rows.
+    // Display order as line keys. Changes only when sorted, so taps never move rows.
     let order = [];
     let settleTimer = null;
 
-    const byLine = (a, b) => a.line.localeCompare(b.line, undefined, { numeric: true }) || a.dest.localeCompare(b.dest);
+    const byLine = (a, b) =>
+      a.name.localeCompare(b.name, undefined, { numeric: true }) || (a.dest || "").localeCompare(b.dest || "");
 
-    /** Chosen visible pairs first, each group by line then destination. */
+    /** Chosen visible lines first, each group by name then destination. */
     function sortLines() {
       clearTimeout(settleTimer);
       settleTimer = null;
-      const rows = visiblePairs().sort(byLine);
+      const rows = visibleLines().sort(byLine);
       order = [
-        ...rows.filter((p) => chosen.has(pairKey(p))),
-        ...rows.filter((p) => !chosen.has(pairKey(p))),
-      ].map(pairKey);
+        ...rows.filter((l) => chosen.has(l.key)),
+        ...rows.filter((l) => !chosen.has(l.key)),
+      ].map((l) => l.key);
     }
 
     // Restarted by taps, and by scrolling once a tap started it, so rows move only after a pause.
@@ -578,11 +574,11 @@
     function renderLines() {
       if (!known) return;
       const pos = new Map(order.map((k, i) => [k, i]));
-      // Pairs missing from the order go last; Infinity - Infinity is NaN, which falls through to byLine.
-      const rows = visiblePairs().sort(
-        (a, b) => (pos.get(pairKey(a)) ?? Infinity) - (pos.get(pairKey(b)) ?? Infinity) || byLine(a, b)
+      // Lines missing from the order go last; Infinity - Infinity is NaN, which falls through to byLine.
+      const rows = visibleLines().sort(
+        (a, b) => (pos.get(a.key) ?? Infinity) - (pos.get(b.key) ?? Infinity) || byLine(a, b)
       );
-      const anyChosen = rows.some((p) => chosen.has(pairKey(p)));
+      const anyChosen = rows.some((l) => chosen.has(l.key));
 
       const scrollTop = linesEl.scrollTop;
       linesEl.innerHTML = "";
@@ -590,8 +586,8 @@
         linesEl.textContent = known.length ? "No lines for the selected vehicle types." : "No known lines.";
         return;
       }
-      rows.forEach((p) => {
-        const k = pairKey(p);
+      rows.forEach((l) => {
+        const k = l.key;
         const row = document.createElement("button");
         row.type = "button";
         row.className = "line-row";
@@ -599,11 +595,11 @@
         row.setAttribute("aria-pressed", String(!anyChosen || chosen.has(k)));
         const icon = document.createElement("span");
         icon.className = "line-icon";
-        icon.innerHTML = ICONS[ICON_BY_CLASS[p.cls]] || "";
+        icon.innerHTML = ICONS[ICON_BY_CLASS[l.cls]] || "";
         const line = document.createElement("strong");
-        line.textContent = p.line;
+        line.textContent = l.name;
         const dest = document.createElement("span");
-        dest.textContent = p.dest;
+        dest.textContent = l.dest || "";
         row.append(icon, line, dest);
         row.addEventListener("click", () => toggleLine(k));
         linesEl.appendChild(row);
