@@ -13,6 +13,12 @@ from .models import DepartureBoard
 INTERVAL = 30
 LIMIT = 15
 HORIZON = 45 * 60
+# Quiet time after a selection change before the board goes out, so a burst of taps is one poll.
+SETTLE = 2
+
+_loop: asyncio.AbstractEventLoop | None = None
+_wake = asyncio.Event()
+_settled_at: float | None = None
 
 
 def build_board(
@@ -32,21 +38,52 @@ def build_board(
     )
 
 
+def schedule() -> None:
+    """Poll SETTLE seconds after the last call. Safe from any thread."""
+    if _loop:
+        _loop.call_soon_threadsafe(_restart_settle)
+
+
+def _restart_settle() -> None:
+    global _settled_at
+    _settled_at = time.monotonic() + SETTLE
+    _wake.set()
+
+
+async def _poll() -> None:
+    station = state.get_station()
+    if not station:
+        return
+    try:
+        board = await run_in_threadpool(
+            build_board,
+            station["id"],
+            state.get_classes(),
+            state.get_lines(station["id"]),
+        )
+        publisher.publish(DEPARTURES_TOPIC, board.model_dump_json())
+    except Exception:
+        # A bad response must not end the loop.
+        traceback.print_exc()
+
+
 async def run() -> None:
-    """Poll every INTERVAL seconds until cancelled."""
+    """Poll every INTERVAL seconds, and SETTLE after a selection change, until cancelled."""
+    global _loop, _settled_at
+    _loop = asyncio.get_running_loop()
+    next_poll = time.monotonic()
     while True:
-        started = time.monotonic()
-        station = state.get_station()
-        if station:
+        # Cleared before reading the deadlines, so a change arriving now still wakes the wait.
+        _wake.clear()
+        now = time.monotonic()
+        # A change in progress holds back the regular poll too.
+        due = _settled_at if _settled_at is not None else next_poll
+        if now < due:
             try:
-                board = await run_in_threadpool(
-                    build_board,
-                    station["id"],
-                    state.get_classes(),
-                    state.get_lines(station["id"]),
-                )
-                publisher.publish(DEPARTURES_TOPIC, board.model_dump_json())
-            except Exception:
-                # A bad response must not end the loop.
-                traceback.print_exc()
-        await asyncio.sleep(max(0.0, INTERVAL - (time.monotonic() - started)))
+                await asyncio.wait_for(_wake.wait(), due - now)
+            except asyncio.TimeoutError:
+                pass
+            continue
+        _settled_at = None
+        await _poll()
+        next_poll = time.monotonic() + INTERVAL

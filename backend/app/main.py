@@ -143,6 +143,7 @@ def select_station(selection: StationSelection):
     if fetched is not None:
         linelist.store(selection.id, fetched)
     state.set_station(selection.id, selection.name)
+    poller.schedule()
     return StationState(**(state.get_station() or {}))
 
 
@@ -172,6 +173,7 @@ def read_classes():
 def select_classes(selection: ClassFilter):
     """Set the vehicle classes to include. Null clears the filter."""
     state.set_classes(selection.classes)
+    poller.schedule()
     return ClassFilter(classes=state.get_classes())
 
 
@@ -193,6 +195,7 @@ def select_lines(selection: LineSelection):
         raise HTTPException(status_code=409, detail="No station selected.")
     known = {line["key"] for line in db.station_lines(current["id"])}
     state.set_lines(current["id"], [key for key in selection.lines if key in known])
+    poller.schedule()
     return LineSelection(lines=state.get_lines(current["id"]))
 
 

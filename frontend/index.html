@@ -447,9 +447,15 @@
         btn.setAttribute("aria-label", f.label);
         btn.innerHTML = ICONS[f.key];
         btn.addEventListener("click", () => {
-          enabled.has(f.key) ? enabled.delete(f.key) : enabled.add(f.key);
-          // Nothing enabled is not a state: turning off the last one turns all on.
-          if (!enabled.size) FILTERS.forEach((x) => enabled.add(x.key));
+          // As with lines: from all, the first tap keeps just this one.
+          if (enabled.size === FILTERS.length) {
+            enabled.clear();
+            enabled.add(f.key);
+          } else {
+            enabled.has(f.key) ? enabled.delete(f.key) : enabled.add(f.key);
+            // Nothing enabled is not a state: turning off the last one turns all on.
+            if (!enabled.size) FILTERS.forEach((x) => enabled.add(x.key));
+          }
           showFilters();
           sortLines();
           renderLines();
