@@ -12,6 +12,7 @@
 #include "gfx.h"
 #include "esp_log.h"
 #include "cJSON.h"
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -41,8 +42,11 @@
 // Layout
 #define MAX_DEPARTURES   6
 #define ROW_HEIGHT       10
+#define TOP_MARGIN       2    // splits the 5 px six rows leave between top and bottom
 #define COL_GAP          4    // between line number, destination and countdown
 #define TICK_MS          1000
+#define FRAME_MS         40   // while alerts scroll, one pixel per frame
+#define ALERT_SEPARATOR  "   +++   "
 
 // Destinations are shortened only as far as the row needs, in three steps: the words below,
 // then cutting words after their first syllable, then "..." from the renderer.
@@ -72,6 +76,9 @@ static const struct { const char *from; const char *to; } ENDINGS[] = {
 };
 
 #define EV_DEPARTURES    BIT0
+#define EV_POWER         BIT1
+#define EV_SETTINGS      BIT2
+#define EV_ALERTS        BIT3
 
 typedef struct {
     char    line[8];
@@ -90,9 +97,19 @@ static ssd1306_handle_t s_display;
 static departure_t s_departures[MAX_DEPARTURES];
 static int s_departure_count;
 
+// All alerts as one line, NULL when there are none. Owned by the display task.
+static char *s_ticker;
+static int   s_ticker_width;
+static int   s_ticker_x;
+
 static TaskHandle_t      s_display_task;
-static SemaphoreHandle_t s_board_lock;
-static char             *s_board_json;   // newest unparsed board, under s_board_lock
+static SemaphoreHandle_t s_rx_lock;
+static char             *s_board_json;    // newest unparsed payloads, under s_rx_lock
+static char             *s_alerts_json;
+
+// Set by the esp-mqtt task, applied by the display task, which owns the I2C bus.
+static atomic_bool s_power_on = true;
+static atomic_int  s_brightness = 100;   // percent
 
 static void init_wifi(void) {
     ESP_ERROR_CHECK(esp_event_loop_create_default());
@@ -113,20 +130,61 @@ static void log_message(const char *topic, const char *payload, size_t len, void
 }
 
 // Runs in the esp-mqtt task: copy and wake, parsing happens in the display task.
-static void on_board(const char *topic, const char *payload, size_t len, void *ctx) {
+static void stash(char **slot, const char *payload, size_t len, uint32_t event) {
     char *copy = malloc(len + 1);
     if (copy == NULL) {
-        ESP_LOGE(TAG, "board dropped: out of memory");
+        ESP_LOGE(TAG, "payload dropped: out of memory");
         return;
     }
     memcpy(copy, payload, len + 1);
 
-    xSemaphoreTake(s_board_lock, portMAX_DELAY);
-    free(s_board_json);   // an unprocessed older board is superseded
-    s_board_json = copy;
-    xSemaphoreGive(s_board_lock);
+    xSemaphoreTake(s_rx_lock, portMAX_DELAY);
+    free(*slot);   // an unprocessed older payload is superseded
+    *slot = copy;
+    xSemaphoreGive(s_rx_lock);
 
-    xTaskNotify(s_display_task, EV_DEPARTURES, eSetBits);
+    xTaskNotify(s_display_task, event, eSetBits);
+}
+
+static char *take(char **slot) {
+    xSemaphoreTake(s_rx_lock, portMAX_DELAY);
+    char *json = *slot;
+    *slot = NULL;
+    xSemaphoreGive(s_rx_lock);
+    return json;
+}
+
+static void on_board(const char *topic, const char *payload, size_t len, void *ctx) {
+    stash(&s_board_json, payload, len, EV_DEPARTURES);
+}
+
+// The payload is a list of {id, version, text}, [] for none.
+static void on_alerts(const char *topic, const char *payload, size_t len, void *ctx) {
+    stash(&s_alerts_json, payload, len, EV_ALERTS);
+}
+
+// Runs in the esp-mqtt task. The payload is "on" or "off".
+static void on_power(const char *topic, const char *payload, size_t len, void *ctx) {
+    if (strcmp(payload, "on") != 0 && strcmp(payload, "off") != 0) {
+        ESP_LOGW(TAG, "power ignored: \"%s\"", payload);
+        return;
+    }
+    atomic_store(&s_power_on, strcmp(payload, "on") == 0);
+    xTaskNotify(s_display_task, EV_POWER, eSetBits);
+}
+
+// Runs in the esp-mqtt task. The payload is the whole settings object, e.g. {"brightness":80}.
+static void on_settings(const char *topic, const char *payload, size_t len, void *ctx) {
+    cJSON *root = cJSON_Parse(payload);
+    const cJSON *brightness = cJSON_GetObjectItem(root, "brightness");
+    if (cJSON_IsNumber(brightness)) {
+        int percent = (int)cJSON_GetNumberValue(brightness);
+        atomic_store(&s_brightness, percent < 0 ? 0 : percent > 100 ? 100 : percent);
+        xTaskNotify(s_display_task, EV_SETTINGS, eSetBits);
+    } else {
+        ESP_LOGW(TAG, "settings ignored: %s", payload);
+    }
+    cJSON_Delete(root);
 }
 
 static esp_err_t init_mqtt(void) {
@@ -322,6 +380,85 @@ static void parse_board(const char *json) {
     ESP_LOGI(TAG, "board: %d departures", s_departure_count);
 }
 
+// Typographic punctuation the font lacks, as ASCII. Each replacement is no longer than its source.
+static void ascii_punctuation(char *s) {
+    static const struct { const char *from; const char *to; } MAP[] = {
+        { "–", "-" },  { "—", "-" },
+        { "„", "\"" }, { "“", "\"" }, { "”", "\"" },
+        { "‚", "'" },  { "‘", "'" },  { "’", "'" },
+        { "…", "..." }, { " ", " " },
+    };
+    char *out = s;
+    while (*s) {
+        size_t i = 0;
+        while (i < ARRAY_LEN(MAP) && strncmp(s, MAP[i].from, strlen(MAP[i].from)) != 0)
+            i++;
+        if (i < ARRAY_LEN(MAP)) {
+            size_t n = strlen(MAP[i].to);
+            memcpy(out, MAP[i].to, n);
+            out += n;
+            s += strlen(MAP[i].from);
+        } else {
+            *out++ = *s++;
+        }
+    }
+    *out = '\0';
+}
+
+// Joins every alert text into one line; none clears it. A new set always restarts the scroll.
+static void parse_alerts(const char *json) {
+    cJSON *root = cJSON_Parse(json);
+    if (!cJSON_IsArray(root)) {
+        ESP_LOGW(TAG, "alerts dropped: invalid json");
+        cJSON_Delete(root);
+        return;
+    }
+
+    size_t size = 1;
+    int count = 0;
+    const cJSON *item;
+    cJSON_ArrayForEach(item, root) {
+        const char *text = cJSON_GetStringValue(cJSON_GetObjectItem(item, "text"));
+        if (text && *text) {
+            size += strlen(text) + (count ? strlen(ALERT_SEPARATOR) : 0);
+            count++;
+        }
+    }
+
+    char *ticker = NULL;
+    if (count > 0) {
+        ticker = malloc(size);
+        if (ticker == NULL) {
+            ESP_LOGE(TAG, "alerts dropped: out of memory");
+            cJSON_Delete(root);
+            return;
+        }
+        ticker[0] = '\0';
+        cJSON_ArrayForEach(item, root) {
+            const char *text = cJSON_GetStringValue(cJSON_GetObjectItem(item, "text"));
+            if (text && *text) {
+                if (ticker[0])
+                    strcat(ticker, ALERT_SEPARATOR);
+                strcat(ticker, text);
+            }
+        }
+        ascii_punctuation(ticker);
+    }
+    cJSON_Delete(root);
+
+    free(s_ticker);
+    s_ticker = ticker;
+    s_ticker_width = ticker ? gfx_text_width(ticker) : 0;
+    s_ticker_x = DISPLAY_WIDTH;
+    ESP_LOGI(TAG, "alerts: %d, %d px", count, s_ticker_width);
+}
+
+// Enters at the right edge and has left the line entirely before it enters again.
+static void scroll_ticker(void) {
+    if (--s_ticker_x + s_ticker_width <= 0)
+        s_ticker_x = DISPLAY_WIDTH;
+}
+
 // Minutes switch at the half minute: 0:30..1:29 is "1 Min", below that "sofort".
 static void format_countdown(const departure_t *d, time_t now, char *out, size_t size) {
     if (!d->rt) {
@@ -341,10 +478,13 @@ static void format_countdown(const departure_t *d, time_t now, char *out, size_t
 
 static void render(void) {
     time_t now = time(NULL);
+    // Alerts take the last row.
+    int rows = s_ticker ? MAX_DEPARTURES - 1 : MAX_DEPARTURES;
+    int count = s_departure_count < rows ? s_departure_count : rows;
 
     // Destinations line up under each other, but only as far right as the board needs.
     int dest_x = 0;
-    for (int i = 0; i < s_departure_count; i++) {
+    for (int i = 0; i < count; i++) {
         int w = gfx_text_width(s_departures[i].line);
         if (w > dest_x)
             dest_x = w;
@@ -352,9 +492,9 @@ static void render(void) {
     dest_x += COL_GAP;
 
     gfx_clear(&s_canvas);
-    for (int i = 0; i < s_departure_count; i++) {
+    for (int i = 0; i < count; i++) {
         const departure_t *d = &s_departures[i];
-        int y = i * ROW_HEIGHT;
+        int y = TOP_MARGIN + i * ROW_HEIGHT;
 
         char countdown[16];
         format_countdown(d, now, countdown, sizeof(countdown));
@@ -367,14 +507,17 @@ static void render(void) {
         fit_destination(d->dest, dest_width, dest, sizeof(dest));
         gfx_draw_string_ellipsized(&s_canvas, dest, dest_x, y, dest_width, GFX_AMBER);
     }
+    if (s_ticker)
+        gfx_draw_string(&s_canvas, s_ticker, s_ticker_x, TOP_MARGIN + rows * ROW_HEIGHT, GFX_AMBER);
 
     ESP_ERROR_CHECK(ssd1306_flush(s_display, s_canvas.buf, s_canvas.width, s_canvas.height));
 }
 
 static void display_task(void *arg) {
     ESP_ERROR_CHECK(mqtt_svc_subscribe(TOPIC_PREFIX "departures", 1, on_board, NULL));
-    ESP_ERROR_CHECK(mqtt_svc_subscribe(TOPIC_PREFIX "power", 1, log_message, NULL));
-    ESP_ERROR_CHECK(mqtt_svc_subscribe(TOPIC_PREFIX "settings", 1, log_message, NULL));
+    ESP_ERROR_CHECK(mqtt_svc_subscribe(TOPIC_PREFIX "alerts", 1, on_alerts, NULL));
+    ESP_ERROR_CHECK(mqtt_svc_subscribe(TOPIC_PREFIX "power", 1, on_power, NULL));
+    ESP_ERROR_CHECK(mqtt_svc_subscribe(TOPIC_PREFIX "settings", 1, on_settings, NULL));
     ESP_ERROR_CHECK(mqtt_svc_subscribe(TOPIC_PREFIX "status", 1, log_message, NULL));
 
     if (mqtt_svc_connect() == ESP_OK)
@@ -382,24 +525,49 @@ static void display_task(void *arg) {
     else
         ESP_LOGE(TAG, "broker unreachable, retrying in the background");
 
+    TickType_t woke = xTaskGetTickCount();
     for (;;) {
+        // Measured from the last wake, so drawing time does not stretch the scroll.
+        bool scrolling = s_ticker && atomic_load(&s_power_on);
+        TickType_t period = pdMS_TO_TICKS(scrolling ? FRAME_MS : TICK_MS);
+        TickType_t busy = xTaskGetTickCount() - woke;
         uint32_t changed;
-        if (xTaskNotifyWait(0, UINT32_MAX, &changed, pdMS_TO_TICKS(TICK_MS)) != pdTRUE)
-            changed = 0;   // timeout: no new board, but the countdowns move on
+        if (xTaskNotifyWait(0, UINT32_MAX, &changed, busy < period ? period - busy : 0) != pdTRUE) {
+            changed = 0;   // timeout: nothing new, but countdowns and alerts move on
+            if (scrolling)
+                scroll_ticker();
+        }
+        woke = xTaskGetTickCount();
 
         if (changed & EV_DEPARTURES) {
-            xSemaphoreTake(s_board_lock, portMAX_DELAY);
-            char *json = s_board_json;
-            s_board_json = NULL;
-            xSemaphoreGive(s_board_lock);
-
+            char *json = take(&s_board_json);
             if (json) {
                 parse_board(json);
                 free(json);
             }
         }
 
-        render();
+        if (changed & EV_ALERTS) {
+            char *json = take(&s_alerts_json);
+            if (json) {
+                parse_alerts(json);
+                free(json);
+            }
+        }
+
+        if (changed & EV_SETTINGS) {
+            // The SSD1306 has no backlight; contrast (segment current) is its brightness.
+            int percent = atomic_load(&s_brightness);
+            ESP_ERROR_CHECK(ssd1306_set_contrast(s_display, (uint8_t)(percent * 255 / 100)));
+        }
+
+        bool on = atomic_load(&s_power_on);
+        if (changed & EV_POWER)
+            ESP_ERROR_CHECK(ssd1306_set_power(s_display, on));
+
+        // Off keeps the board current but skips drawing; the first pass after on draws it.
+        if (on)
+            render();
     }
 }
 
@@ -423,7 +591,7 @@ void app_main(void)
         return;
     }
 
-    s_board_lock = xSemaphoreCreateMutex();
-    ESP_ERROR_CHECK(s_board_lock != NULL ? ESP_OK : ESP_ERR_NO_MEM);
+    s_rx_lock = xSemaphoreCreateMutex();
+    ESP_ERROR_CHECK(s_rx_lock != NULL ? ESP_OK : ESP_ERR_NO_MEM);
     xTaskCreate(display_task, "display", 8192, NULL, 5, &s_display_task);
 }

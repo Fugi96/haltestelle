@@ -121,7 +121,12 @@ static int draw_glyph(gfx_canvas_t *c, const font_glyph_t *g, int x, int y, gfx_
 int gfx_draw_string(gfx_canvas_t *c, const char *str, int x, int y, gfx_color_t color) {
     while (*str) {
         const font_glyph_t *g = glyph_for(utf8_next(&str));
-        if (g)
+        if (g == NULL)
+            continue;
+        // Glyphs off the canvas only advance, so long scrolling text stays cheap.
+        if (x + g->width <= 0 || x >= c->width)
+            x += g->width;
+        else
             x = draw_glyph(c, g, x, y, color);
     }
     return x;
