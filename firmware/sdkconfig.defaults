@@ -1,0 +1,4 @@
+# Read when sdkconfig is created; an existing sdkconfig takes precedence.
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+# Two 1700K app slots, room for OTA updates.
+CONFIG_PARTITION_TABLE_TWO_OTA_LARGE=y
