@@ -54,9 +54,9 @@ esp_err_t ssd1306_init(i2c_master_dev_handle_t i2c, ssd1306_handle_t *h) {
         0xA6, // Set Normal Display (not Inverse)
         0xD5, 0x80, // Set Display Clock Divide Ratio/Oscilator Frequency (0x80 = 1 0 0 0 | 0 0 0 0 = 8 Oscillator Freq, 1 Divide Ratio (0 + 1))
         0x8D, 0x14, // Enable charge pump regulator
-        0x20, 0x00, // Addressing Mode Parameter 00b = Horizontal Addressing Mode
-        0x21, 0x00, 0xFF, // Set Column Start/End address
-        0x22, 0x00, 0xFF, // Set Page Start/End address
+        0x20, 0x01, // Vertical Addressing Mode: column by column, so the pages of a column change together
+        0x21, 0x00, 0x7F, // Set Column Start/End address
+        0x22, 0x00, 0x07, // Set Page Start/End address
         0xAF // Set Display ON
     };
 
@@ -76,15 +76,16 @@ esp_err_t ssd1306_flush(ssd1306_handle_t h, const uint16_t *pixels, int width, i
     if (h == NULL || pixels == NULL) return ESP_ERR_INVALID_ARG;
     if (width != SSD1306_WIDTH || height != SSD1306_HEIGHT) return ESP_ERR_INVALID_SIZE;
 
-    // Rows of colors become pages of vertical bytes, bit 0 on top; any color but black is on.
+    // Rows of colors become vertical bytes, bit 0 on top, ordered column by column for vertical
+    // addressing; any color but black is on.
     memset(h->fb, 0x00, SSD1306_FB_SIZE);
     for (int y = 0; y < SSD1306_HEIGHT; y++) {
         const uint16_t *row = &pixels[y * SSD1306_WIDTH];
-        uint8_t *page = &h->fb[(y / SSD1306_PAGE_HEIGHT) * SSD1306_WIDTH];
+        int page = y / SSD1306_PAGE_HEIGHT;
         uint8_t bit = 0x01 << (y % SSD1306_PAGE_HEIGHT);
         for (int x = 0; x < SSD1306_WIDTH; x++)
             if (row[x] != 0)
-                page[x] |= bit;
+                h->fb[x * SSD1306_PAGES + page] |= bit;
     }
 
     return i2c_master_transmit(h->i2c, &h->ctrl, 1 + SSD1306_FB_SIZE, I2C_TIMEOUT_MS);
