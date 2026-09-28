@@ -23,6 +23,7 @@ Endpoints:
     GET  /api/settings         -> output settings (brightness)
     PUT  /api/settings         -> store output settings
     GET  /api/departures       -> departures for the selected station
+    GET  /api/alerts           -> their current disruption notices
 
 Run (from the `backend/` directory):
 
@@ -30,6 +31,7 @@ Run (from the `backend/` directory):
 """
 
 import asyncio
+import logging
 import os
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
@@ -38,9 +40,11 @@ import httpx
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from uvicorn.logging import DefaultFormatter
 
 from . import db, efa, linelist, mqtt, poller, state
 from .models import (
+    Alert,
     ClassFilter,
     DepartureBoard,
     KnownLine,
@@ -57,6 +61,15 @@ from .models import (
 FRONTEND_DIR = Path(
     os.environ.get("FRONTEND_DIR", Path(__file__).resolve().parents[2] / "frontend")
 )
+
+# uvicorn configures only its own loggers; without this, app INFO lines go nowhere.
+_log = logging.getLogger("app")
+if not _log.handlers:
+    _handler = logging.StreamHandler()
+    # uvicorn's own formatter, so app lines match its padded, coloured level prefix.
+    _handler.setFormatter(DefaultFormatter("%(levelprefix)s %(asctime)s %(name)s: %(message)s"))
+    _log.addHandler(_handler)
+    _log.setLevel(logging.INFO)
 
 
 @asynccontextmanager
@@ -260,8 +273,27 @@ def read_departures(limit: int = Query(poller.LIMIT, ge=1, le=200)):
     if not current:
         raise HTTPException(status_code=409, detail="No station selected.")
     try:
-        return poller.build_board(
+        board, _ = poller.build(
             current["id"], state.get_classes(), state.get_lines(current["id"]), limit
         )
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"Departure lookup failed: {exc}")
+    return board
+
+
+@app.get("/api/alerts", response_model=list[Alert])
+def read_alerts():
+    """Current disruption notices for the selected station, classes and lines.
+
+    Built exactly as the poller builds them, so they can be inspected directly.
+    """
+    current = state.get_station()
+    if not current:
+        raise HTTPException(status_code=409, detail="No station selected.")
+    try:
+        _, alerts = poller.build(
+            current["id"], state.get_classes(), state.get_lines(current["id"])
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Alert lookup failed: {exc}")
+    return alerts

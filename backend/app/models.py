@@ -83,4 +83,11 @@ class DepartureBoard(BaseModel):
     station: str | None = None
     gen: int = Field(description="Build time, epoch seconds.")
     departures: list[Departure] = []
-    alerts: list[str] = Field([], description="Disruption notices, as plain text.")
+
+
+class Alert(BaseModel):
+    """A disruption notice describing the current situation."""
+
+    id: str = Field(description="EFA notice id.")
+    version: int | None = Field(None, description="Revision of the notice; rises when it is edited.")
+    text: str = Field(description="Notice as plain text.")

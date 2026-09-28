@@ -16,9 +16,11 @@ Both are synchronous, like the rest of the app. Async callers should use
 import datetime as dt
 import html
 import json
+import logging
 import os
 import re
 import time
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -26,6 +28,8 @@ EFA_BASE_URL = os.environ.get(
     "EFA_BASE_URL", "https://openservice-test.vrr.de/openservice"
 )
 _TIMEOUT = httpx.Timeout(10.0)
+
+log = logging.getLogger(__name__)
 
 
 def search_locations(query: str, limit: int = 8) -> list[dict]:
@@ -78,6 +82,19 @@ _GENERIC_NAMES = {"Hbf", "Hauptbahnhof", "Bf", "Bahnhof", "Btf", "Betriebshof", 
 
 # Some infoLinks carry only a link label ("Hier alle Infos"), not real text.
 _MIN_ALERT_LEN = 40
+
+# Planned works are published for weeks or open-ended; incidents get windows of hours.
+_INCIDENT_WINDOW = 2 * 24 * 3600
+# Newer notices count whatever their window, so an open-ended incident is not lost.
+_NEW_NOTICE_AGE = 24 * 3600
+
+# incidentDateTime, in local time unlike every other EFA timestamp.
+_VALIDITY = re.compile(r"(\d\d/\d\d/\d{4} \d\d:\d\d) - (\d\d/\d\d/\d{4} \d\d:\d\d)")
+_LOCAL = ZoneInfo("Europe/Berlin")
+
+# Parsed notices by (id, version), so each revision is read once.
+_notices: dict[tuple, dict] = {}
+_MAX_NOTICES = 500
 
 # Including any of these also returns class 0, Ersatzverkehr.
 _RAIL_CLASSES = {13, 14, 15, 16}
@@ -164,6 +181,75 @@ def _strip_html(text: str) -> str:
     return re.sub(r"\s+", " ", html.unescape(text)).strip()
 
 
+def _local_epoch(stamp: str) -> int | None:
+    """EFA local "DD/MM/YYYY HH:MM" -> epoch seconds, None if not a date."""
+    try:
+        return int(dt.datetime.strptime(stamp, "%d/%m/%Y %H:%M").replace(tzinfo=_LOCAL).timestamp())
+    except ValueError:
+        return None
+
+
+def _notice_text(link: dict) -> str:
+    """The first field with real text. `content` is fullest but can be only a link label."""
+    for field in ("content", "smsText", "subtitle"):
+        text = _strip_html(link.get(field) or "")
+        if len(text) >= _MIN_ALERT_LEN:
+            return text
+    return ""
+
+
+def _parse_notice(info: dict) -> dict:
+    """An `infos` entry as id, version, text, and start, end and created in epoch seconds."""
+    validity = _VALIDITY.fullmatch((info.get("properties") or {}).get("incidentDateTime") or "")
+    created = (info.get("timestamps") or {}).get("creation")
+    try:
+        created = _epoch(created) if created else None
+    except ValueError:
+        created = None
+    text = next((t for link in info.get("infoLinks") or [] if (t := _notice_text(link))), "")
+    return {
+        "id": info.get("id") or text,
+        "version": info.get("version"),
+        "text": text,
+        "start": _local_epoch(validity[1]) if validity else None,
+        "end": _local_epoch(validity[2]) if validity else None,
+        "created": created,
+    }
+
+
+def _notice(info: dict, now: float) -> dict:
+    """`_parse_notice`, cached per revision. Each new revision is logged once."""
+    key = (info.get("id"), info.get("version"))
+    if key[0] and key in _notices:
+        return _notices[key]
+    notice = _parse_notice(info)
+    if key[0]:
+        if len(_notices) >= _MAX_NOTICES:
+            _notices.clear()
+        _notices[key] = notice
+    log.info(
+        "notice %s v%s %s, valid %s, created %s, %s: %.80s",
+        notice["id"],
+        notice["version"],
+        info.get("type"),
+        (info.get("properties") or {}).get("incidentDateTime"),
+        (info.get("timestamps") or {}).get("creation"),
+        "relevant" if _relevant(notice, now) else "not relevant",
+        notice["text"] or "(no text)",
+    )
+    return notice
+
+
+def _relevant(notice: dict, now: float) -> bool:
+    """Whether a notice describes the current situation: a short window, or a new notice."""
+    start, end, created = notice["start"], notice["end"], notice["created"]
+    if not notice["text"] or (end is not None and end < now):
+        return False
+    short = start is not None and end is not None and end - start < _INCIDENT_WINDOW
+    new = created is not None and now - created < _NEW_NOTICE_AGE
+    return short or new
+
+
 def fetch_departures(
     station_id: str,
     limit: int = 8,
@@ -182,6 +268,9 @@ def fetch_departures(
     records and HTML notices repeated per event; this reduces it to roughly
     1 kB. `ts` and `delay` are both epoch seconds — EFA resolves to 30s at
     best, and seconds stay within a 32-bit int.
+
+    `alerts` holds the relevant notices (`_relevant`) of every fetched event,
+    `within` notwithstanding, as id, version and text.
 
     Raises httpx.HTTPError on network or HTTP failures.
     """
@@ -208,9 +297,11 @@ def fetch_departures(
     resp.raise_for_status()
     events = resp.json().get("stopEvents") or []
 
+    now = time.time()
     departures = []
-    # Keyed by info id so the same notice, repeated on every event, lands once.
-    alerts: dict[str, str] = {}
+    # Keyed by text: a notice repeats on every event, and operators of one line
+    # publish the same text under separate ids.
+    alerts: dict[str, dict] = {}
     locality, abbrev = _locality_of(events[0]) if events else ("", "")
 
     for event in events:
@@ -238,16 +329,15 @@ def fetch_departures(
         )
 
         for info in event.get("infos", []):
-            for link in info.get("infoLinks", []):
-                text = _strip_html(link.get("content") or link.get("subtitle") or "")
-                if len(text) >= _MIN_ALERT_LEN:
-                    alerts.setdefault(info.get("id") or text, text)
+            notice = _notice(info, now)
+            if notice["text"] not in alerts and _relevant(notice, now):
+                alerts[notice["text"]] = notice
 
     # Realtime estimates reorder departures and EFA does not re-sort.
     departures.sort(key=lambda d: d["ts"])
 
     if within is not None:
-        horizon = time.time() + within
+        horizon = now + within
         departures = [d for d in departures if d["ts"] <= horizon]
 
     return {
@@ -255,9 +345,9 @@ def fetch_departures(
         if events
         else None,
         # Reference point for countdowns, and for spotting stale data.
-        "gen": int(time.time()),
+        "gen": int(now),
         "departures": departures,
-        "alerts": list(alerts.values()),
+        "alerts": [{"id": n["id"], "version": n["version"], "text": n["text"]} for n in alerts.values()],
     }
 
 

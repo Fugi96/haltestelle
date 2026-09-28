@@ -11,6 +11,7 @@ from .config import mqtt as cfg
 log = logging.getLogger(__name__)
 
 DEPARTURES_TOPIC = cfg.topic("departures")
+ALERTS_TOPIC = cfg.topic("alerts")
 POWER_TOPIC = cfg.topic("power")
 SETTINGS_TOPIC = cfg.topic("settings")
 STATUS_TOPIC = cfg.topic("status")

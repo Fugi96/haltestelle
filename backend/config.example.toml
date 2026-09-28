@@ -14,6 +14,7 @@ reconnect_delay = 5
 
 [mqtt.topics]
 departures = "departures"
+alerts = "alerts"
 power = "power"
 settings = "settings"
 status = "status"

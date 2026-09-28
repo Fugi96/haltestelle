@@ -19,6 +19,7 @@ class MqttTopics(_Section):
     """Topic names, relative to the prefix."""
 
     departures: str = Field(default="departures", min_length=1)
+    alerts: str = Field(default="alerts", min_length=1)
     power: str = Field(default="power", min_length=1)
     settings: str = Field(default="settings", min_length=1)
     status: str = Field(default="status", min_length=1)
