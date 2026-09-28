@@ -13,6 +13,8 @@
       display: flex; flex-direction: column;
     }
     body > * { flex-shrink: 0; }
+    /* The page itself never scrolls, bounces or pulls to refresh; the panels scroll on their own. */
+    html, body { overflow: hidden; overscroll-behavior: none; }
     [hidden] { display: none !important; }
     button { cursor: pointer; }
     .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
@@ -45,7 +47,8 @@
     }
     .brightness-head { display: flex; justify-content: space-between; font-size: 0.9rem; color: #333; margin-bottom: 0.5rem; }
     #brightness-value { font-weight: 600; font-variant-numeric: tabular-nums; }
-    #brightness { width: 100%; margin: 0; accent-color: var(--sign); }
+    /* A drag on the slider only moves the slider, even when not quite horizontal. */
+    #brightness { width: 100%; margin: 0; accent-color: var(--sign); touch-action: none; }
 
     /* Station name plate, with the white pinstripe of a platform sign. */
     .sign {
