@@ -96,3 +96,18 @@ class Alert(BaseModel):
     id: str = Field(description="EFA notice id.")
     version: int | None = Field(None, description="Revision of the notice; rises when it is edited.")
     text: str = Field(description="Notice as plain text.")
+
+
+class AlertDetail(Alert):
+    """A notice with the lines it was found on and the end of its window."""
+
+    lines: list[str] = Field([], description="Lines of the fetched departures carrying the notice.")
+    until: int | None = Field(None, description="End of the notice's window, epoch seconds; None if open-ended.")
+
+
+class AlertStatus(BaseModel):
+    """Alerts of the last successful poll, and when newer ones are expected."""
+
+    alerts: list[AlertDetail] = Field(description="Notices of the last successful poll.")
+    pending: bool = Field(description="True while no successful poll covers the latest selection change.")
+    refresh_in: float = Field(description="Seconds until newer alerts are expected.")

@@ -19,7 +19,7 @@
     button { cursor: pointer; }
     .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 
-    /* Brand row: stop sign mark, name, settings and power. */
+    /* Brand row: stop sign mark, name, alerts, settings and power. */
     .brand { display: flex; align-items: center; gap: 0.55rem; }
     .brand-mark { width: 1.9rem; height: 1.9rem; }
     .brand h1 { margin: 0; font-size: 0.9rem; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: #333; }
@@ -32,6 +32,12 @@
     .ctl svg { display: block; width: 100%; height: 100%; }
     .ctl:active { transform: scale(0.88); }
     #settings-btn { color: #666; }
+    #alert-btn { position: relative; color: #f0a500; }
+    #alert-count {
+      position: absolute; top: 0.1rem; right: 0; min-width: 1.1rem; height: 1.1rem; padding: 0 0.25rem;
+      box-sizing: border-box; border-radius: 999px; background: var(--sign); color: #fff;
+      font-size: 0.7rem; font-weight: 700; line-height: 1.1rem; text-align: center;
+    }
     /* Red icon when on. When off, a white icon on a solid red disc: the one colored element left. */
     #power-btn { position: relative; color: #e2231a; transition: color 1.5s, transform 0.08s; }
     #power-btn::before {
@@ -41,11 +47,17 @@
     #power-btn svg { position: relative; }
     #power-btn[aria-pressed="false"] { color: #fff; }
     #power-btn[aria-pressed="false"]::before { opacity: 1; transform: scale(1); }
-    #settings-panel {
-      position: absolute; top: 100%; right: 0; width: 15rem; max-width: calc(100vw - 2rem); margin-top: 0.4rem;
-      padding: 0.8rem 1rem 0.9rem; box-sizing: border-box;
+    .dropdown {
+      position: absolute; top: 100%; right: 0; max-width: calc(100vw - 2rem); margin-top: 0.4rem; box-sizing: border-box;
       background: #fff; border: 1px solid #ddd; border-radius: 14px; box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
     }
+    #settings-panel { width: 15rem; padding: 0.8rem 1rem 0.9rem; }
+    #alert-panel { width: 22rem; max-height: 60vh; max-height: 60dvh; overflow-y: auto; overscroll-behavior: contain; }
+    #alert-list { margin: 0; padding: 0; list-style: none; }
+    #alert-list li { padding: 0.7rem 1rem; font-size: 0.9rem; line-height: 1.4; color: #333; overflow-wrap: anywhere; }
+    #alert-list li + li { border-top: 1px solid #eee; }
+    #alert-list p { margin: 0; }
+    #alert-list small { display: block; margin-top: 0.3rem; text-align: right; font-size: 0.75rem; color: #888; }
     .setting + .setting { margin-top: 0.8rem; padding-top: 0.8rem; border-top: 1px solid #eee; }
     .setting-head { display: flex; justify-content: space-between; align-items: center; font-size: 0.9rem; color: #333; }
     .setting-head:not(:last-child) { margin-bottom: 0.5rem; }
@@ -172,6 +184,15 @@
     </svg>
     <h1>Haltestelle</h1>
     <div class="controls">
+      <!-- First, so appearing does not shift the other controls. -->
+      <button id="alert-btn" class="ctl" type="button" aria-label="Alerts" aria-expanded="false" aria-controls="alert-panel" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 3 22 20.5H2Z" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round" />
+          <path d="M12 9.5v4.5" stroke="#fff" stroke-width="2.4" stroke-linecap="round" />
+          <circle cx="12" cy="17.4" r="1.3" fill="#fff" />
+        </svg>
+        <span id="alert-count"></span>
+      </button>
       <button id="settings-btn" class="ctl" type="button" aria-label="Settings" aria-expanded="false" aria-controls="settings-panel">
         <svg viewBox="0 0 24 24" fill="currentColor" fill-rule="evenodd" aria-hidden="true">
           <path d="M10.16 4.01L10.47 1.11H13.53L13.84 4.01A8.2 8.2 0 0 1 16.35 5.05L18.62 3.22L20.78 5.38L18.95 7.65A8.2 8.2 0 0 1 19.99 10.16L22.89 10.47V13.53L19.99 13.84A8.2 8.2 0 0 1 18.95 16.35L20.78 18.62L18.62 20.78L16.35 18.95A8.2 8.2 0 0 1 13.84 19.99L13.53 22.89H10.47L10.16 19.99A8.2 8.2 0 0 1 7.65 18.95L5.38 20.78L3.22 18.62L5.05 16.35A8.2 8.2 0 0 1 4.01 13.84L1.11 13.53V10.47L4.01 10.16A8.2 8.2 0 0 1 5.05 7.65L3.22 5.38L5.38 3.22L7.65 5.05A8.2 8.2 0 0 1 10.16 4.01ZM8.7 12a3.3 3.3 0 1 0 6.6 0a3.3 3.3 0 1 0-6.6 0Z" />
@@ -182,7 +203,10 @@
           <path d="M12 3v8" /><path d="M6.6 6.4a8 8 0 1 0 10.8 0" />
         </svg>
       </button>
-      <div id="settings-panel" hidden>
+      <div id="alert-panel" class="dropdown" hidden>
+        <ul id="alert-list"></ul>
+      </div>
+      <div id="settings-panel" class="dropdown" hidden>
         <div class="setting">
           <div class="setting-head"><label for="brightness">Brightness</label><output id="brightness-value" for="brightness"></output></div>
           <input id="brightness" type="range" min="5" max="100" step="5" />
@@ -300,9 +324,16 @@
       });
     }
 
-    function showPanel(open) {
-      settingsPanel.hidden = !open;
-      settingsBtn.setAttribute("aria-expanded", String(open));
+    const alertBtn = document.getElementById("alert-btn");
+    const alertPanel = document.getElementById("alert-panel");
+    const PANELS = [[alertBtn, alertPanel], [settingsBtn, settingsPanel]];
+
+    /** Opens the given dropdown and closes the others; null closes all. */
+    function openPanel(panel) {
+      PANELS.forEach(([btn, p]) => {
+        p.hidden = p !== panel;
+        btn.setAttribute("aria-expanded", String(p === panel));
+      });
     }
 
     powerBtn.addEventListener("click", () => {
@@ -310,14 +341,14 @@
       showSettings();
       saveSettings("/api/power", power);
     });
-    settingsBtn.addEventListener("click", () => showPanel(settingsPanel.hidden));
-    document.addEventListener("keydown", (e) => { if (e.key === "Escape") showPanel(false); });
+    PANELS.forEach(([btn, p]) => btn.addEventListener("click", () => openPanel(p.hidden ? p : null)));
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") openPanel(null); });
     // A tap outside closes the panel and goes no further, so it cannot toggle a line by accident.
     document.addEventListener("click", (e) => {
-      if (settingsPanel.hidden || controls.contains(e.target)) return;
+      if (PANELS.every(([, p]) => p.hidden) || controls.contains(e.target)) return;
       e.stopPropagation();
       e.preventDefault();
-      showPanel(false);
+      openPanel(null);
     }, true);
     // Label follows the thumb; saving waits for release.
     brightInput.addEventListener("input", () => { brightValue.textContent = brightInput.value + "%"; });
@@ -413,6 +444,7 @@
         // Chosen lines are kept per station.
         await loadChosen().catch(() => {});
         loadLines();
+        loadAlerts();
       } catch (e) {
         status.textContent = "Error: " + e.message;
       }
@@ -463,14 +495,15 @@
       train: '<img src="/assets/db.svg" alt="">',
     };
 
-    // `classes` are EFA product.class values. Including 13-16 also returns
-    // class 0 Ersatzverkehr, so it needs no button of its own. 11 is the Wuppertal Schwebebahn.
+    // `classes` are EFA product.class values. Including 13 also returns class 0
+    // Ersatzverkehr, so it needs no button of its own. 11 is the Wuppertal Schwebebahn.
+    // Long-distance (14-16) is left out; the backend never requests it either.
     const FILTERS = [
       { key: "sbahn", label: "S-Bahn", classes: [1] },
       { key: "ubahn", label: "U-Bahn", classes: [2] },
       { key: "tram", label: "Tram", classes: [4, 11] },
       { key: "bus", label: "Bus", classes: [5, 7] },
-      { key: "train", label: "Zug", classes: [13, 14, 15, 16] },
+      { key: "train", label: "Zug", classes: [13] },
     ];
 
     const filtersEl = document.getElementById("filters");
@@ -521,6 +554,7 @@
           renderLines();
         }
       });
+      loadAlerts();
     }
 
     function renderFilters() {
@@ -591,6 +625,7 @@
           renderLines();
         }
       });
+      loadAlerts();
     }
 
     /** Known lines whose class passes the class filter. Mirrors efa.class_included. */
@@ -715,12 +750,86 @@
       }
     }
 
-    // Show the settings, current station, filters and lines on load.
+    // --- alerts --------------------------------------------------------------
+
+    const alertCount = document.getElementById("alert-count");
+    const alertList = document.getElementById("alert-list");
+    // Only used when the backend cannot be reached; otherwise it says when to ask again.
+    const ALERT_RETRY_S = 30;
+    // Only the newest request may render and schedule, since responses can arrive out of order.
+    let alertSeq = 0;
+    let alertTimer = null;
+
+    const pad = (n) => String(n).padStart(2, "0");
+
+    /** "19:50" today, "02.10., 19:50" on another day. */
+    function formatUntil(epoch) {
+      const d = new Date(epoch * 1000);
+      const time = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      return d.toDateString() === new Date().toDateString() ? time : `${pad(d.getDate())}.${pad(d.getMonth() + 1)}., ${time}`;
+    }
+
+    function alertItem(a) {
+      const li = document.createElement("li");
+      const p = document.createElement("p");
+      if (a.lines.length) {
+        const lines = document.createElement("strong");
+        lines.textContent = [...a.lines].sort((x, y) => x.localeCompare(y, undefined, { numeric: true })).join(", ") + " — ";
+        p.append(lines);
+      }
+      p.append(a.text);
+      li.append(p);
+      if (a.until !== null) {
+        const until = document.createElement("small");
+        until.textContent = "valid until " + formatUntil(a.until);
+        li.append(until);
+      }
+      return li;
+    }
+
+    function showAlerts(list) {
+      alertBtn.hidden = !list.length;
+      alertCount.textContent = list.length;
+      alertList.replaceChildren(...list.map(alertItem));
+      if (!list.length && !alertPanel.hidden) openPanel(null);
+    }
+
+    // A hidden page asks nothing; it asks once it is visible again.
+    function scheduleAlerts(seconds) {
+      clearTimeout(alertTimer);
+      alertTimer = setTimeout(() => { if (!document.hidden) loadAlerts(); }, seconds * 1000);
+    }
+
+    /** Shows the alerts of the last poll, which the display shows too, and asks again when told. */
+    async function loadAlerts() {
+      clearTimeout(alertTimer);
+      const seq = ++alertSeq;
+      try {
+        // Pending saves first, so the answer already knows about the change.
+        await Promise.all([sync, lineSync]);
+        const res = await fetch("/api/alerts");
+        if (seq !== alertSeq) return;
+        // No station, nothing to follow; selecting one asks again.
+        if (res.status === 409) { showAlerts([]); return; }
+        if (!res.ok) throw new Error(res.statusText);
+        const { alerts, refresh_in } = await res.json();
+        if (seq !== alertSeq) return;
+        showAlerts(alerts);
+        scheduleAlerts(refresh_in);
+      } catch {
+        if (seq === alertSeq) scheduleAlerts(ALERT_RETRY_S);
+      }
+    }
+
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) loadAlerts(); });
+
+    // Show the settings, current station, filters, lines and alerts on load.
     showSettings();
     loadSettings().catch(() => {});
     fetch("/api/station").then((r) => r.json()).then(showCurrent).catch(() => {});
     loadClasses().catch(() => {});
     loadChosen().catch(() => {}).finally(loadLines);
+    loadAlerts();
   </script>
 </body>
 </html>

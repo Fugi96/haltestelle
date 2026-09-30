@@ -91,6 +91,8 @@ _NEW_NOTICE_AGE = 24 * 3600
 # incidentDateTime, in local time unlike every other EFA timestamp.
 _VALIDITY = re.compile(r"(\d\d/\d\d/\d{4} \d\d:\d\d) - (\d\d/\d\d/\d{4} \d\d:\d\d)")
 _LOCAL = ZoneInfo("Europe/Berlin")
+# Ends from here on are EFA's 31/12/2500 sentinel for "indefinite".
+_INDEFINITE = dt.datetime(2500, 1, 1, tzinfo=_LOCAL).timestamp()
 
 # Parsed notices by (id, version), so each revision is read once.
 _notices: dict[tuple, dict] = {}
@@ -101,6 +103,10 @@ _RAIL_CLASSES = {13, 14, 15, 16}
 
 # Long-distance trains: serving lines lists them once per train number.
 _LONG_DISTANCE = {14, 15, 16}
+
+# Requested when no class filter is set: every class with local departures,
+# long-distance never. Class 0 comes along with 13.
+_LOCAL_CLASSES = [1, 2, 4, 5, 7, 11, 13]
 
 
 def class_included(cls: int | None, classes: list[int] | None) -> bool:
@@ -260,8 +266,9 @@ def fetch_departures(
     """Fetch upcoming departures for a stop, trimmed to the useful fields.
 
     `station_id` is an EFA global id (DHID) as returned by `search_locations`.
-    `classes` restricts to those EFA product classes and `lines` to those line
-    ids; None means all. `limit` counts after both filters. `within` drops
+    `classes` restricts to those EFA product classes, None meaning every local
+    one, and `lines` to those line ids, None meaning all. Long-distance classes
+    are never requested. `limit` counts after both filters. `within` drops
     departures more than that many seconds away; EFA itself has no time filter.
 
     The raw response runs ~30 kB for eight departures, mostly nested location
@@ -270,12 +277,14 @@ def fetch_departures(
     best, and seconds stay within a 32-bit int.
 
     `alerts` holds the relevant notices (`_relevant`) of every fetched event,
-    `within` notwithstanding, as id, version and text.
+    `within` notwithstanding, as id, version, text, the lines of the events
+    carrying them, and `until`, the end of their window (None if open-ended).
 
     Raises httpx.HTTPError on network or HTTP failures.
     """
+    wanted = [c for c in (_LOCAL_CLASSES if classes is None else classes) if c not in _LONG_DISTANCE]
     # No includedMeans at all would mean every class, the opposite of empty.
-    if classes is not None and not classes:
+    if not wanted:
         return {"station": None, "gen": int(time.time()), "departures": [], "alerts": []}
 
     params = {
@@ -288,9 +297,8 @@ def fetch_departures(
         "limit": str(limit),
         "itdDate": dt.date.today().strftime("%Y%m%d"),
     }
-    if classes is not None:
-        # Must repeat the parameter; "4,5" matches nothing.
-        params["includedMeans"] = [str(c) for c in classes] # type: ignore
+    # Must repeat the parameter; "4,5" matches nothing.
+    params["includedMeans"] = [str(c) for c in wanted] # type: ignore
     if lines:
         params["line"] = lines # type: ignore
     resp = httpx.get(f"{EFA_BASE_URL}/XML_DM_REQUEST", params=params, timeout=_TIMEOUT)
@@ -306,6 +314,7 @@ def fetch_departures(
 
     for event in events:
         transport = event["transportation"]
+        line = _line_name(transport)
         planned = event["departureTimePlanned"]
         # Only set when the trip is realtime-controlled. Absent for a whole
         # stop during engineering works, and for cross-operator services.
@@ -317,7 +326,7 @@ def fetch_departures(
 
         departures.append(
             {
-                "line": _line_name(transport),
+                "line": line,
                 "cls": transport.get("product", {}).get("class"),
                 "dest": _clean_name(transport["destination"]["name"], locality, abbrev),
                 "ts": _epoch(estimated or planned),
@@ -331,7 +340,11 @@ def fetch_departures(
         for info in event.get("infos", []):
             notice = _notice(info, now)
             if notice["text"] not in alerts and _relevant(notice, now):
-                alerts[notice["text"]] = notice
+                # A copy: the parsed notice is cached across polls.
+                alerts[notice["text"]] = {**notice, "lines": []}
+            # Notices attach to trips, so their lines are the carrying events' lines.
+            if (alert := alerts.get(notice["text"])) and line not in alert["lines"]:
+                alert["lines"].append(line)
 
     # Realtime estimates reorder departures and EFA does not re-sort.
     departures.sort(key=lambda d: d["ts"])
@@ -347,7 +360,16 @@ def fetch_departures(
         # Reference point for countdowns, and for spotting stale data.
         "gen": int(now),
         "departures": departures,
-        "alerts": [{"id": n["id"], "version": n["version"], "text": n["text"]} for n in alerts.values()],
+        "alerts": [
+            {
+                "id": n["id"],
+                "version": n["version"],
+                "text": n["text"],
+                "lines": n["lines"],
+                "until": n["end"] if n["end"] is not None and n["end"] < _INDEFINITE else None,
+            }
+            for n in alerts.values()
+        ],
     }
 
 

@@ -23,7 +23,7 @@ Endpoints:
     GET  /api/settings         -> output settings (brightness, alerts, scroll speed, language)
     PUT  /api/settings         -> store output settings
     GET  /api/departures       -> departures for the selected station
-    GET  /api/alerts           -> their current disruption notices
+    GET  /api/alerts           -> notices of the last poll, and when newer ones are due
 
 Run (from the `backend/` directory):
 
@@ -44,7 +44,7 @@ from uvicorn.logging import DefaultFormatter
 
 from . import db, efa, linelist, mqtt, poller, state
 from .models import (
-    Alert,
+    AlertStatus,
     ClassFilter,
     DepartureBoard,
     KnownLine,
@@ -281,19 +281,12 @@ def read_departures(limit: int = Query(poller.LIMIT, ge=1, le=200)):
     return board
 
 
-@app.get("/api/alerts", response_model=list[Alert])
-def read_alerts():
-    """Current disruption notices for the selected station, classes and lines.
+@app.get("/api/alerts", response_model=AlertStatus)
+async def read_alerts():
+    """Disruption notices of the last successful poll, and when newer ones are expected.
 
-    Built exactly as the poller builds them, so they can be inspected directly.
+    No EFA request. Async so it reads the poller's state on the loop that changes it.
     """
-    current = state.get_station()
-    if not current:
+    if not state.get_station():
         raise HTTPException(status_code=409, detail="No station selected.")
-    try:
-        _, alerts = poller.build(
-            current["id"], state.get_classes(), state.get_lines(current["id"])
-        )
-    except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"Alert lookup failed: {exc}")
-    return alerts
+    return poller.alert_status()
