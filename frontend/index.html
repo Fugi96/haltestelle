@@ -19,7 +19,7 @@
     button { cursor: pointer; }
     .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 
-    /* Brand row: stop sign mark, name, brightness and power. */
+    /* Brand row: stop sign mark, name, settings and power. */
     .brand { display: flex; align-items: center; gap: 0.55rem; }
     .brand-mark { width: 1.9rem; height: 1.9rem; }
     .brand h1 { margin: 0; font-size: 0.9rem; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: #333; }
@@ -31,6 +31,7 @@
     }
     .ctl svg { display: block; width: 100%; height: 100%; }
     .ctl:active { transform: scale(0.88); }
+    #settings-btn { color: #666; }
     /* Red icon when on. When off, a white icon on a solid red disc: the one colored element left. */
     #power-btn { position: relative; color: #e2231a; transition: color 1.5s, transform 0.08s; }
     #power-btn::before {
@@ -40,15 +41,42 @@
     #power-btn svg { position: relative; }
     #power-btn[aria-pressed="false"] { color: #fff; }
     #power-btn[aria-pressed="false"]::before { opacity: 1; transform: scale(1); }
-    #brightness-panel {
+    #settings-panel {
       position: absolute; top: 100%; right: 0; width: 15rem; max-width: calc(100vw - 2rem); margin-top: 0.4rem;
       padding: 0.8rem 1rem 0.9rem; box-sizing: border-box;
       background: #fff; border: 1px solid #ddd; border-radius: 14px; box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
     }
-    .brightness-head { display: flex; justify-content: space-between; font-size: 0.9rem; color: #333; margin-bottom: 0.5rem; }
+    .setting + .setting { margin-top: 0.8rem; padding-top: 0.8rem; border-top: 1px solid #eee; }
+    .setting-head { display: flex; justify-content: space-between; align-items: center; font-size: 0.9rem; color: #333; }
+    .setting-head:not(:last-child) { margin-bottom: 0.5rem; }
     #brightness-value { font-weight: 600; font-variant-numeric: tabular-nums; }
     /* A drag on the slider only moves the slider, even when not quite horizontal. */
     #brightness { width: 100%; margin: 0; accent-color: var(--sign); touch-action: none; }
+    .switch {
+      appearance: none; position: relative; flex-shrink: 0; width: 2.6rem; height: 1.5rem; margin: 0;
+      border-radius: 999px; background: #ccc; transition: background 0.15s;
+      touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+    }
+    .switch::before {
+      content: ""; position: absolute; top: 0.15rem; left: 0.15rem; width: 1.2rem; height: 1.2rem;
+      border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); transition: transform 0.15s;
+    }
+    .switch:checked { background: var(--sign); }
+    .switch:checked::before { transform: translateX(1.1rem); }
+    #speed { transition: filter 0.15s, opacity 0.15s; }
+    #speed.disabled { filter: saturate(0.2); opacity: 0.45; }
+    .speed { display: flex; gap: 0.35rem; }
+    .speed button {
+      flex: 1; height: 2.2rem; padding: 0; font: inherit; font-size: 0.85rem; color: #333;
+      background: #fff; border: 1px solid #ccc; border-radius: 8px;
+      touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+    }
+    .speed button[aria-pressed="true"] { background: var(--sign); border-color: var(--sign); color: #fff; }
+    .speed button:disabled { cursor: default; }
+    #language {
+      height: 2.2rem; padding: 0 0.5rem; font: inherit; font-size: 0.85rem; color: #333;
+      background: #fff; border: 1px solid #ccc; border-radius: 8px;
+    }
 
     /* Station name plate, with the white pinstripe of a platform sign. */
     .sign {
@@ -144,10 +172,9 @@
     </svg>
     <h1>Haltestelle</h1>
     <div class="controls">
-      <button id="brightness-btn" class="ctl" type="button" aria-label="Brightness" aria-expanded="false" aria-controls="brightness-panel">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true">
-          <circle cx="12" cy="12" r="4" />
-          <path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" />
+      <button id="settings-btn" class="ctl" type="button" aria-label="Settings" aria-expanded="false" aria-controls="settings-panel">
+        <svg viewBox="0 0 24 24" fill="currentColor" fill-rule="evenodd" aria-hidden="true">
+          <path d="M10.16 4.01L10.47 1.11H13.53L13.84 4.01A8.2 8.2 0 0 1 16.35 5.05L18.62 3.22L20.78 5.38L18.95 7.65A8.2 8.2 0 0 1 19.99 10.16L22.89 10.47V13.53L19.99 13.84A8.2 8.2 0 0 1 18.95 16.35L20.78 18.62L18.62 20.78L16.35 18.95A8.2 8.2 0 0 1 13.84 19.99L13.53 22.89H10.47L10.16 19.99A8.2 8.2 0 0 1 7.65 18.95L5.38 20.78L3.22 18.62L5.05 16.35A8.2 8.2 0 0 1 4.01 13.84L1.11 13.53V10.47L4.01 10.16A8.2 8.2 0 0 1 5.05 7.65L3.22 5.38L5.38 3.22L7.65 5.05A8.2 8.2 0 0 1 10.16 4.01ZM8.7 12a3.3 3.3 0 1 0 6.6 0a3.3 3.3 0 1 0-6.6 0Z" />
         </svg>
       </button>
       <button id="power-btn" class="ctl" type="button" aria-label="Power" aria-pressed="true">
@@ -155,9 +182,30 @@
           <path d="M12 3v8" /><path d="M6.6 6.4a8 8 0 1 0 10.8 0" />
         </svg>
       </button>
-      <div id="brightness-panel" hidden>
-        <div class="brightness-head"><label for="brightness">Brightness</label><output id="brightness-value" for="brightness"></output></div>
-        <input id="brightness" type="range" min="5" max="100" step="5" />
+      <div id="settings-panel" hidden>
+        <div class="setting">
+          <div class="setting-head"><label for="brightness">Brightness</label><output id="brightness-value" for="brightness"></output></div>
+          <input id="brightness" type="range" min="5" max="100" step="5" />
+        </div>
+        <div class="setting setting-head">
+          <label for="alerts">Alerts</label><input id="alerts" class="switch" type="checkbox" role="switch" />
+        </div>
+        <div id="speed" class="setting" role="group" aria-labelledby="speed-label">
+          <div class="setting-head"><span id="speed-label">Scroll speed</span></div>
+          <!-- Pixels per second, about x1.6 apart. -->
+          <div class="speed">
+            <button type="button" data-speed="15">Slow</button>
+            <button type="button" data-speed="25">Normal</button>
+            <button type="button" data-speed="40">Fast</button>
+          </div>
+        </div>
+        <div class="setting setting-head">
+          <label for="language">Language</label>
+          <select id="language">
+            <option value="de" lang="de">Deutsch</option>
+            <option value="en" lang="en">English</option>
+          </select>
+        </div>
       </div>
     </div>
   </header>
@@ -194,22 +242,34 @@
     const signName = document.getElementById("sign-name");
     const searchForm = document.getElementById("search");
 
-    // --- power and brightness ------------------------------------------------
+    // --- power and settings --------------------------------------------------
 
     const powerBtn = document.getElementById("power-btn");
-    const brightBtn = document.getElementById("brightness-btn");
-    const brightPanel = document.getElementById("brightness-panel");
+    const controls = document.querySelector(".controls");
+    const settingsBtn = document.getElementById("settings-btn");
+    const settingsPanel = document.getElementById("settings-panel");
     const brightInput = document.getElementById("brightness");
     const brightValue = document.getElementById("brightness-value");
+    const alertsInput = document.getElementById("alerts");
+    const speedGroup = document.getElementById("speed");
+    const speedBtns = [...speedGroup.querySelectorAll("button")];
+    const languageInput = document.getElementById("language");
     // The backend holds these; this mirrors it.
     const power = { on: true };
-    const settings = { brightness: 100 };
+    const settings = { brightness: 100, alerts: true, scroll_speed: 25, language: "en" };
 
     function showSettings() {
       document.body.classList.toggle("off", !power.on);
       powerBtn.setAttribute("aria-pressed", String(power.on));
       brightInput.value = settings.brightness;
       brightValue.textContent = settings.brightness + "%";
+      alertsInput.checked = settings.alerts;
+      speedGroup.classList.toggle("disabled", !settings.alerts);
+      speedBtns.forEach((b) => {
+        b.disabled = !settings.alerts;
+        b.setAttribute("aria-pressed", String(Number(b.dataset.speed) === settings.scroll_speed));
+      });
+      languageInput.value = settings.language;
     }
 
     async function loadSettings() {
@@ -240,9 +300,9 @@
       });
     }
 
-    function showBrightness(open) {
-      brightPanel.hidden = !open;
-      brightBtn.setAttribute("aria-expanded", String(open));
+    function showPanel(open) {
+      settingsPanel.hidden = !open;
+      settingsBtn.setAttribute("aria-expanded", String(open));
     }
 
     powerBtn.addEventListener("click", () => {
@@ -250,12 +310,33 @@
       showSettings();
       saveSettings("/api/power", power);
     });
-    brightBtn.addEventListener("click", () => showBrightness(brightPanel.hidden));
-    document.addEventListener("keydown", (e) => { if (e.key === "Escape") showBrightness(false); });
+    settingsBtn.addEventListener("click", () => showPanel(settingsPanel.hidden));
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") showPanel(false); });
+    // A tap outside closes the panel and goes no further, so it cannot toggle a line by accident.
+    document.addEventListener("click", (e) => {
+      if (settingsPanel.hidden || controls.contains(e.target)) return;
+      e.stopPropagation();
+      e.preventDefault();
+      showPanel(false);
+    }, true);
     // Label follows the thumb; saving waits for release.
     brightInput.addEventListener("input", () => { brightValue.textContent = brightInput.value + "%"; });
     brightInput.addEventListener("change", () => {
       settings.brightness = Number(brightInput.value);
+      saveSettings("/api/settings", settings);
+    });
+    alertsInput.addEventListener("change", () => {
+      settings.alerts = alertsInput.checked;
+      showSettings();
+      saveSettings("/api/settings", settings);
+    });
+    speedBtns.forEach((b) => b.addEventListener("click", () => {
+      settings.scroll_speed = Number(b.dataset.speed);
+      showSettings();
+      saveSettings("/api/settings", settings);
+    }));
+    languageInput.addEventListener("change", () => {
+      settings.language = languageInput.value;
       saveSettings("/api/settings", settings);
     });
 

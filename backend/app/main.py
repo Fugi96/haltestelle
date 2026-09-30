@@ -20,7 +20,7 @@ Endpoints:
     PUT  /api/lines            -> set those keys (empty for all)
     GET  /api/power            -> whether output is on
     PUT  /api/power            -> switch output on or off
-    GET  /api/settings         -> output settings (brightness)
+    GET  /api/settings         -> output settings (brightness, alerts, scroll speed, language)
     PUT  /api/settings         -> store output settings
     GET  /api/departures       -> departures for the selected station
     GET  /api/alerts           -> their current disruption notices

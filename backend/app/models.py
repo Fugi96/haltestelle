@@ -1,5 +1,7 @@
 """Pydantic schemas for request bodies and responses."""
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -44,6 +46,9 @@ class OutputSettings(BaseModel):
     """Output settings."""
 
     brightness: int = Field(100, ge=0, le=100, description="Brightness in percent.")
+    alerts: bool = Field(True, description="Whether alerts are shown.")
+    scroll_speed: int = Field(25, ge=1, le=100, description="Alert scroll speed, pixels per second.")
+    language: Literal["de", "en"] = Field("en", description="Language, ISO 639-1 code.")
 
 
 class KnownLine(BaseModel):
