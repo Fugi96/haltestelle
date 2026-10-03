@@ -15,6 +15,9 @@ data/
 .env
 backend/config.toml
 
+# Docker
+compose.override.yaml
+
 ## ESP-IDF
 build/
 managed_components/

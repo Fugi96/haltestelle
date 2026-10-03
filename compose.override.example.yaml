@@ -1,0 +1,4 @@
+# Copy to compose.override.yaml to use your own broker instead of the bundled one.
+services:
+  mqtt:
+    profiles: [disabled]

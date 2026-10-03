@@ -38,11 +38,14 @@ class Publisher:
             self._loop.call_soon_threadsafe(self._wake.set)
 
     def _client(self) -> aiomqtt.Client:
+        password = cfg.secret()
+        if password is None and cfg.password_file:
+            raise aiomqtt.MqttError(f"{cfg.password_file} is missing or empty")
         return aiomqtt.Client(
             hostname=cfg.host,
             port=cfg.port,
             username=cfg.username,
-            password=cfg.password,
+            password=password,
             will=aiomqtt.Will(STATUS_TOPIC, b"offline", qos=cfg.qos, retain=True),
         )
 

@@ -6,6 +6,8 @@ host = "localhost"
 port = 1883
 username = ""
 password = ""
+# Read for the password on each connection attempt, if password is empty.
+password_file = ""
 # Topics are <prefix>/<name>.
 prefix = "haltestelle"
 qos = 1

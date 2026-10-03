@@ -1,0 +1,32 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      MQTT_HOST: ${MQTT_HOST:-mqtt}
+      MQTT_PORT: ${MQTT_PORT:-1883}
+      MQTT_USERNAME: ${MQTT_USERNAME:-app}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-}
+      MQTT_PASSWORD_FILE: /secrets/mqtt_password
+    volumes:
+      - data:/data
+      - secrets:/secrets:ro
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    restart: unless-stopped
+
+  mqtt:
+    image: eclipse-mosquitto:2.1-alpine
+    entrypoint: ["sh", "/entrypoint.sh"]
+    ports:
+      - "1883:1883"
+    volumes:
+      - secrets:/secrets
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto/entrypoint.sh:/entrypoint.sh:ro
+    restart: unless-stopped
+
+volumes:
+  data:
+  secrets:
