@@ -1,21 +1,19 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 152 96" role="img" aria-label="Tram">
-  <!-- Windows are cut out, so the icon sits on any background. -->
-  <mask id="tram">
-    <rect width="152" height="96" fill="#000"/>
-    <path d="M50 8 72 22 50 36 28 22Z" fill="none" stroke="#fff" stroke-width="3.5"/>
-    <rect x="34" y="31" width="32" height="5" fill="#fff"/>
-    <rect x="6" y="34" width="140" height="6" rx="1.5" fill="#fff"/>
-    <rect x="4" y="38" width="144" height="46" rx="8" fill="#fff"/>
-    <path d="M19 80h14v4a7 7 0 0 1-14 0Z" fill="#fff"/>
-    <path d="M45 80h14v4a7 7 0 0 1-14 0Z" fill="#fff"/>
-    <path d="M95 80h14v4a7 7 0 0 1-14 0Z" fill="#fff"/>
-    <path d="M119 80h14v4a7 7 0 0 1-14 0Z" fill="#fff"/>
-    <rect x="8" y="45" width="13" height="24" rx="3" fill="#000"/>
-    <rect x="25" y="45" width="13" height="32" rx="3" fill="#000"/>
-    <rect x="42" y="45" width="32" height="26" rx="3" fill="#000"/>
-    <rect x="78" y="45" width="32" height="26" rx="3" fill="#000"/>
-    <rect x="114" y="45" width="13" height="32" rx="3" fill="#000"/>
-    <rect x="131" y="45" width="13" height="24" rx="3" fill="#000"/>
-  </mask>
-  <rect width="152" height="96" fill="#BF8F00" mask="url(#tram)"/>
+  <!-- Windows are holes in the body (evenodd), not a mask: Chrome on iOS renders masks blurry. -->
+  <g fill="#BF8F00">
+    <path d="M50 8 72 22 50 36 28 22Z" fill="none" stroke="#BF8F00" stroke-width="3.5"/>
+    <rect x="34" y="31" width="32" height="5"/>
+    <rect x="6" y="34" width="140" height="6" rx="1.5"/>
+    <path fill-rule="evenodd" d="M12 38H140A8 8 0 0 1 148 46V76A8 8 0 0 1 140 84H12A8 8 0 0 1 4 76V46A8 8 0 0 1 12 38Z
+      M11 45H18A3 3 0 0 1 21 48V66A3 3 0 0 1 18 69H11A3 3 0 0 1 8 66V48A3 3 0 0 1 11 45Z
+      M28 45H35A3 3 0 0 1 38 48V74A3 3 0 0 1 35 77H28A3 3 0 0 1 25 74V48A3 3 0 0 1 28 45Z
+      M45 45H71A3 3 0 0 1 74 48V68A3 3 0 0 1 71 71H45A3 3 0 0 1 42 68V48A3 3 0 0 1 45 45Z
+      M81 45H107A3 3 0 0 1 110 48V68A3 3 0 0 1 107 71H81A3 3 0 0 1 78 68V48A3 3 0 0 1 81 45Z
+      M117 45H124A3 3 0 0 1 127 48V74A3 3 0 0 1 124 77H117A3 3 0 0 1 114 74V48A3 3 0 0 1 117 45Z
+      M134 45H141A3 3 0 0 1 144 48V66A3 3 0 0 1 141 69H134A3 3 0 0 1 131 66V48A3 3 0 0 1 134 45Z"/>
+    <path d="M19 80h14v4a7 7 0 0 1-14 0Z"/>
+    <path d="M45 80h14v4a7 7 0 0 1-14 0Z"/>
+    <path d="M95 80h14v4a7 7 0 0 1-14 0Z"/>
+    <path d="M119 80h14v4a7 7 0 0 1-14 0Z"/>
+  </g>
 </svg>
