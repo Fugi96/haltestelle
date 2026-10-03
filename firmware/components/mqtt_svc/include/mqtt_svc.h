@@ -8,7 +8,8 @@
 
 // for documentation: broker_uri must be a valid non-null null-terminated c-string, e.g. "mqtt://192.168.1.10:1883"
 // for documentation: client_id may be null (broker assigns one) or a null-terminated c-string
-// for documentation: username/password may both be null (anonymous broker) or valid null-terminated c-strings
+// for documentation: username/password may both be null (anonymous broker) or valid null-terminated c-strings;
+// MQTT_SVC_DEFAULT_CONFIG turns an empty Kconfig value into null
 // for documentation: lifecycle: init -> (subscribe)* -> connect -> (publish | subscribe | unsubscribe | flush)* -> disconnect -> deinit
 // for documentation: before a successful init, functions return ESP_ERR_INVALID_STATE (publish returns -1)
 // for documentation: requires an established IP connection (wlink connected + got IP) before connect is called
@@ -46,18 +47,18 @@ typedef struct {
     void                  *cb_ctx;               // passed to the three callbacks above
 } mqtt_svc_settings_t;
 
-#define MQTT_SVC_DEFAULT_CONFIG() (mqtt_svc_settings_t){ \
-    .broker_uri         = CONFIG_MQTT_SVC_BROKER_URI,    \
-    .username           = CONFIG_MQTT_SVC_USERNAME,      \
-    .password           = CONFIG_MQTT_SVC_PASSWORD,      \
-    .connect_timeout_ms = 10000,                         \
-    .max_payload_len    = 8192,                          \
-    .last_will          = {                              \
-        .topic  = NULL,                                  \
-        .msg    = NULL,                                  \
-        .qos    = 1,                                     \
-        .retain = true,                                  \
-    }                                                    \
+#define MQTT_SVC_DEFAULT_CONFIG() (mqtt_svc_settings_t){                                 \
+    .broker_uri         = CONFIG_MQTT_SVC_BROKER_URI,                                    \
+    .username           = CONFIG_MQTT_SVC_USERNAME[0] ? CONFIG_MQTT_SVC_USERNAME : NULL, \
+    .password           = CONFIG_MQTT_SVC_PASSWORD[0] ? CONFIG_MQTT_SVC_PASSWORD : NULL, \
+    .connect_timeout_ms = 10000,                                                         \
+    .max_payload_len    = 8192,                                                          \
+    .last_will          = {                                                              \
+        .topic  = NULL,                                                                  \
+        .msg    = NULL,                                                                  \
+        .qos    = 1,                                                                     \
+        .retain = true,                                                                  \
+    }                                                                                    \
 }
 
 // Creates and configures the underlying esp-mqtt client. Does NOT open the connection.

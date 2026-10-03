@@ -9,15 +9,17 @@ menu "mqtt_svc Configuration"
 
     config MQTT_SVC_USERNAME
         string "MQTT Username"
-        default "myusername"
+        default ""
         help
             Username of the MQTT client used for authentication.
+            Empty connects anonymously.
 
     config MQTT_SVC_PASSWORD
         string "MQTT Password"
-        default "mypassword"
+        default ""
         help
             MQTT password used to authenticate at the broker.
+            Empty sends no password.
 
     config MQTT_SVC_MAX_SUBSCRIPTIONS
         int "Maximum subscriptions"

@@ -195,8 +195,6 @@ static esp_err_t init_mqtt(void) {
     snprintf(client_id, sizeof(client_id), CLIENT_ID_PREFIX MACSTR,
         MAC2STR(mac));
     mqtt_settings.client_id = client_id;
-    mqtt_settings.username = NULL;
-    mqtt_settings.password = NULL;
 
     return mqtt_svc_init(&mqtt_settings);
 }
