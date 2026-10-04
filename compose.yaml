@@ -2,7 +2,7 @@ services:
   app:
     build: .
     ports:
-      - "8000:8000"
+      - "${WEB_APP_PORT:-8000}:8000"
     environment:
       MQTT_HOST: ${MQTT_HOST:-mqtt}
       MQTT_PORT: ${MQTT_PORT:-1883}
@@ -20,7 +20,7 @@ services:
     image: eclipse-mosquitto:2.1-alpine
     entrypoint: ["sh", "/entrypoint.sh"]
     ports:
-      - "1883:1883"
+      - "${BUNDLED_BROKER_PORT:-1883}:1883"
     volumes:
       - secrets:/secrets
       - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
