@@ -9,8 +9,8 @@ from pydantic import TypeAdapter
 from starlette.concurrency import run_in_threadpool
 
 from . import db, efa, state
-from .mqtt import ALERTS_TOPIC, DEPARTURES_TOPIC, publisher
 from .models import Alert, AlertDetail, AlertStatus, DepartureBoard
+from .mqtt import ALERTS_TOPIC, DEPARTURES_TOPIC, publisher
 
 INTERVAL = 30
 LIMIT = 15
@@ -115,7 +115,7 @@ async def _poll() -> None:
             state.get_classes(),
             state.get_lines(station["id"]),
         )
-    except Exception:
+    except Exception:  # noqa: BLE001
         # A bad response must not end the loop, nor clear the alerts.
         _alerts_due = _alerts_due or due
         traceback.print_exc()
@@ -139,7 +139,7 @@ async def run() -> None:
         if now < due:
             try:
                 await asyncio.wait_for(_wake.wait(), due - now)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
             continue
         _settled_at = _next_poll = None

@@ -255,7 +255,7 @@ def lines_generated_at(station_id: str) -> dt.datetime | None:
         ).fetchone()
     if not row or not row["lines_generated_at"]:
         return None
-    return dt.datetime.fromisoformat(row["lines_generated_at"]).replace(tzinfo=dt.timezone.utc)
+    return dt.datetime.fromisoformat(row["lines_generated_at"]).replace(tzinfo=dt.UTC)
 
 
 def mark_lines_generated(station_id: str) -> None:

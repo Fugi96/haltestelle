@@ -120,7 +120,7 @@ def _epoch(stamp: str) -> int:
     """EFA UTC timestamp -> epoch seconds."""
     return int(
         dt.datetime.strptime(stamp, _EFA_TIME)
-        .replace(tzinfo=dt.timezone.utc)
+        .replace(tzinfo=dt.UTC)
         .timestamp()
     )
 

@@ -95,7 +95,7 @@ async def run() -> None:
         if station and is_stale(station["id"]):
             try:
                 await run_in_threadpool(refresh, station["id"], station["name"])
-            except Exception:
+            except Exception:  # noqa: BLE001
                 traceback.print_exc()
                 delay = min(delay, RETRY)
         await asyncio.sleep(delay)
