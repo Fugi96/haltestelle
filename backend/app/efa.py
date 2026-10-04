@@ -295,7 +295,8 @@ def fetch_departures(
         "depType": "stopEvents",
         "useRealtime": "1",
         "limit": str(limit),
-        "itdDate": dt.date.today().strftime("%Y%m%d"),
+        # Local date, not the system's: a UTC container would ask for yesterday after midnight.
+        "itdDate": dt.datetime.now(_LOCAL).strftime("%Y%m%d"),
     }
     # Must repeat the parameter; "4,5" matches nothing.
     params["includedMeans"] = [str(c) for c in wanted] # type: ignore
