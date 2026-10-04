@@ -1,4 +1,6 @@
 # Haltestelle
+[![CI](https://github.com/Fugi96/haltestelle/actions/workflows/ci.yml/badge.svg)](https://github.com/Fugi96/haltestelle/actions/workflows/ci.yml)
+
 A departure monitor for a single public transport stop within VRR (Verkehrsverbund Rhein-Ruhr) and most of NRW (North-Rhine-Westphalia) using the VRR OpenService EFA API (https://www.opendata-oepnv.de/ht/de/api). A web application running in a Docker container picks the stop and lines, and an ESP32 controlling a small OLED display shows the next departures for the selected lines at the selected stop within the next 45 minutes with realtime data, if available. Furthermore, turning the display on or off as well as controlling settings such as the brightness are also supported.
 
 The goal of this project is to create a home departure monitor that resembles most commonly found public departure monitors as closely as possible.
