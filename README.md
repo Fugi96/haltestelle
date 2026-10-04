@@ -76,7 +76,7 @@ All topics live under a prefix (default `haltestelle`), are published with QoS 1
 Requires Docker with Compose. Runs on a Raspberry Pi (arm64) as well as on x86.
 
 ```bash
-git clone <repo-url> haltestelle
+git clone https://github.com/Fugi96/haltestelle.git
 cd haltestelle
 docker compose up -d
 ```
