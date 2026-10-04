@@ -25,14 +25,11 @@
 
 // I2C setup
 #define I2C_PORT                I2C_NUM_0
-#define PIN_SDA                 25
-#define PIN_SCL                 26
-#define DISPLAY_ADDR            0x3C
+#define PIN_SDA                 CONFIG_DISPLAY_PIN_SDA
+#define PIN_SCL                 CONFIG_DISPLAY_PIN_SCL
+#define DISPLAY_ADDR            CONFIG_DISPLAY_I2C_ADDR
 #define DISPLAY_WIDTH           128
 #define DISPLAY_HEIGHT          64
-
-// ADC setup
-#define MAX_CONSECUTIVE_FAULTS  5
 
 // Misc.
 #define CLIENT_ID_PREFIX "haltestelle-esp-display-"
